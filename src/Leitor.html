@@ -111,6 +111,10 @@
       if (!k.length) return;
       apelidos.push({ tipo: 'cat', alvo: cat, seq: k, completo: true });
       if (k.length > 1) apelidos.push({ tipo: 'cat', alvo: cat, seq: [k[0]], completo: false });
+      // O ditado junta ou separa palavras: "videogame" = "VÍDEO GAME", "video game" = "VIDEOGAME".
+      for (var i = 0; i + 1 < k.length; i++) {
+        apelidos.push({ tipo: 'cat', alvo: cat, seq: k.slice(0, i).concat([chave(k[i] + k[i + 1])], k.slice(i + 2)), completo: true });
+      }
     });
     return apelidos;
   }

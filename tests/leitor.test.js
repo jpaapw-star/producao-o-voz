@@ -157,3 +157,21 @@ test('validação é categoria: "notebooks validados" e "validação notebook" c
   // Notebook comum continua notebook.
   assert.deepStrictEqual(resumo(l.ler('Ana Leal 2 notebooks finalizados', '')), [['ANA LEAL', 'NOTEBOOK', 0, 2, 0]]);
 });
+
+test('"videogame" junto casa com "VÍDEO GAME" e validações de várias categorias', () => {
+  const cats = ['NOTEBOOK', 'FONE', 'VÍDEO GAME', 'VALIDAÇÃO NOTEBOOK', 'VALIDAÇÃO ROTEADOR', 'VALIDAÇÃO VÍDEO GAME', 'ROTEADOR'];
+  const l = leitor({ categorias: cats });
+  assert.deepStrictEqual(resumo(l.ler('Gabriel Vieira validação notebooks 2 testados um defeito Validação videogame Um testado 3 defeitos Notebooks 3 testados 2 finalizados', '')), [
+    ['GABRIEL VIEIRA', 'VALIDAÇÃO NOTEBOOK', 2, 0, 1],
+    ['GABRIEL VIEIRA', 'VALIDAÇÃO VÍDEO GAME', 1, 0, 3],
+    ['GABRIEL VIEIRA', 'NOTEBOOK', 3, 2, 0]
+  ]);
+  const r = l.ler('2 notebooks testados um notebook defeito 3 validações videogames testadas uma validação videogame defeito 3 fones finalizados', 'JOÃO PEDRO');
+  assert.deepStrictEqual(resumo(r), [
+    ['JOÃO PEDRO', 'NOTEBOOK', 2, 0, 1],
+    ['JOÃO PEDRO', 'VALIDAÇÃO VÍDEO GAME', 3, 0, 1],
+    ['JOÃO PEDRO', 'FONE', 0, 3, 0]
+  ]);
+  assert.deepStrictEqual(resumo(l.ler('Julia 4 video games testados', '')), [['JULIA GOMES', 'VÍDEO GAME', 4, 0, 0]]);
+  assert.deepStrictEqual(resumo(l.ler('Julia 2 videogames validados', '')), [['JULIA GOMES', 'VALIDAÇÃO VÍDEO GAME', 2, 0, 0]]);
+});
