@@ -29,7 +29,7 @@ const html = fs.readFileSync(path.join(raiz, 'Index.html'), 'utf8')
     pg.on('pageerror', (e) => console.error('ERRO NA PÁGINA:', e.message));
     await pg.goto('http://previa.local/');
     await pg.waitForSelector('#tLancar.ativa');
-    await pg.fill('#fala', 'Artur Antunes 3 webcams finalizadas 4 notebooks testados e finalizados 5 fones de feito. Causa 2 teclados testados ontem. Ô Julia, você viu a chave do armário? Daniel 4');
+    await pg.fill('#fala', '3 webcams finalizadas. Julia 4 notebooks testados e finalizados 5 fones de feito.');
     await pg.dispatchEvent('#fala', 'input');
     await pg.waitForTimeout(400);
     await pg.screenshot({ path: path.join(saida, 'tela-' + tema + '.png'), fullPage: true });

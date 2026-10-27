@@ -94,17 +94,9 @@
   <div class="rodape"><button id="tentar">Tentar de novo</button></div>
 </div>
 
-<div id="tQuem" class="tela">
-  <h1>Quem é você?</h1>
-  <p class="sub">Quando você falar sem dizer um nome, a produção vai para você. Supervisor: o app pergunta de quem é.</p>
-  <input id="busca" class="campo" placeholder="Buscar nome" autocomplete="off">
-  <div id="listaPessoas" class="lista"></div>
-</div>
-
 <div id="tLancar" class="tela">
   <div class="topo">
     <h1>Produção</h1>
-    <button id="trocarQuem" class="pilula" title="Trocar quem está lançando"></button>
   </div>
   <div class="faixa">
     <button id="faixaMenos" aria-label="Hora anterior">‹</button>
@@ -112,12 +104,12 @@
     <button id="faixaMais" aria-label="Próxima hora">›</button>
   </div>
   <textarea id="fala" placeholder="Ex.: Ana Leal notebook 3 testados 2 finalizados. Julia roteador 4 testados."></textarea>
-  <div class="dica">No celular, toque no microfone do teclado. No PC, aperte Windows + H. Pode falar várias pessoas de uma vez. Conversa no meio é ignorada, e "esquece" apaga a frase.</div>
+  <div class="dica">No celular, toque no microfone do teclado. No PC, aperte Windows + H. Diga sempre o nome da pessoa; pode falar várias de uma vez. Conversa no meio é ignorada, e "esquece" apaga a frase.</div>
   <div id="avisosGerais" class="geral"></div>
   <div id="naoEntendi" class="naoentendi"></div>
   <div id="ignorados" class="naoentendi"></div>
   <div id="previa"></div>
-  <button id="abrirHoje" class="link">Meus lançamentos de hoje</button>
+  <button id="abrirHoje" class="link">Lançamentos de hoje neste aparelho</button>
   <div class="rodape"><button id="gravar" disabled>Gravar</button></div>
 </div>
 
@@ -126,7 +118,7 @@
     <h1>Hoje</h1>
     <button id="voltarHoje" class="pilula">Voltar</button>
   </div>
-  <p class="sub">O que você lançou hoje. Desfazer apaga só as linhas daquele lançamento.</p>
+  <p class="sub">O que foi lançado hoje neste aparelho. Desfazer apaga só as linhas daquele lançamento.</p>
   <div id="listaHoje"></div>
 </div>
 
@@ -142,11 +134,14 @@
     por: function (k, v) { try { localStorage.setItem('producao.' + k, v); } catch (e) {} },
     tirar: function (k) { try { localStorage.removeItem('producao.' + k); } catch (e) {} }
   };
-  var estado = { quem: guardar.ler('quem'), dados: null, leitor: null,
+  // Sem tela de "Quem é você?": cada aparelho ganha um código só para separar os lançamentos dele no histórico.
+  var aparelho = guardar.ler('aparelho');
+  if (!aparelho) { aparelho = 'Aparelho ' + Math.random().toString(36).slice(2, 6).toUpperCase(); guardar.por('aparelho', aparelho); }
+  var estado = { dados: null, leitor: null,
     hora: null, linhas: [], ajustes: {}, ultimo: null, gravando: false };
 
   function tela(id) {
-    ['tCarregando', 'tErro', 'tQuem', 'tLancar', 'tHoje'].forEach(function (t) { $(t).classList.toggle('ativa', t === id); });
+    ['tCarregando', 'tErro', 'tLancar', 'tHoje'].forEach(function (t) { $(t).classList.toggle('ativa', t === id); });
   }
 
   function chamar(nome) {
@@ -161,7 +156,7 @@
 
   /* ---------- entrada ---------- */
   function iniciar() {
-    guardar.tirar('codigo');
+    guardar.tirar('codigo'); guardar.tirar('quem');
     tela('tCarregando');
     chamar('apiInicio').then(function (d) {
       estado.dados = d;
@@ -169,7 +164,6 @@
       estado.hora = d.hora;
       // Diferença entre o relógio do servidor e o do aparelho, para a faixa seguir a hora certa.
       estado.ajusteHora = d.hora - new Date().getHours();
-      if (!estado.quem || d.pessoas.indexOf(estado.quem) < 0) { mostrarPessoas(); return; }
       abrirLancar();
     }).catch(function (e) {
       tela('tErro'); $('erroInicio').textContent = mensagem(e);
@@ -177,30 +171,9 @@
   }
   $('tentar').onclick = iniciar;
 
-  function mostrarPessoas() {
-    tela('tQuem');
-    $('busca').value = '';
-    desenharPessoas('');
-  }
-  function desenharPessoas(filtro) {
-    var f = LeitorProducao.normalizar(filtro);
-    var lista = $('listaPessoas');
-    lista.innerHTML = '';
-    estado.dados.pessoas.filter(function (p) { return !f || LeitorProducao.normalizar(p).indexOf(f) >= 0; })
-      .forEach(function (p) {
-        var b = document.createElement('button');
-        b.textContent = p;
-        b.onclick = function () { estado.quem = p; guardar.por('quem', p); abrirLancar(); };
-        lista.appendChild(b);
-      });
-  }
-  $('busca').oninput = function () { desenharPessoas(this.value); };
-  $('trocarQuem').onclick = mostrarPessoas;
-
   /* ---------- lançar ---------- */
   function abrirLancar() {
     tela('tLancar');
-    $('trocarQuem').textContent = estado.quem;
     if (!$('fala').value) $('fala').value = guardar.ler('rascunho');
     desenharFaixa();
     atualizar();
@@ -243,7 +216,7 @@
   function chaveLinha(l, i) { return i + '|' + l.ditoPessoa + '|' + l.ditoCategoria; }
 
   function atualizar() {
-    var r = estado.leitor.ler($('fala').value, estado.quem);
+    var r = estado.leitor.ler($('fala').value, '');
     estado.linhas = r.linhas.map(function (l, i) {
       var aj = estado.ajustes[chaveLinha(l, i)];
       if (aj) Object.keys(aj).forEach(function (k) { l[k] = aj[k]; });
@@ -361,7 +334,7 @@
     if (estado.gravando) return;
     estado.gravando = true; desenhar();
     var pedido = {
-      quem: estado.quem, hora: estado.hora, texto: $('fala').value, confirmarRepetidos: !!confirmarRepetidos,
+      quem: aparelho, hora: estado.hora, texto: $('fala').value, confirmarRepetidos: !!confirmarRepetidos,
       linhas: estado.linhas.map(function (l) {
         return { pessoa: l.pessoa, categoria: l.categoria, testados: l.testados, finalizados: l.finalizados, defeitos: l.defeitos };
       })
@@ -416,9 +389,9 @@
     var caixa = $('listaHoje');
     caixa.innerHTML = '';
     caixa.appendChild(el('div', 'vazio', 'Carregando…'));
-    chamar('apiHoje', estado.quem).then(function (lista) {
+    chamar('apiHoje', aparelho).then(function (lista) {
       caixa.innerHTML = '';
-      if (!lista.length) { caixa.appendChild(el('div', 'vazio', 'Nada lançado hoje por ' + estado.quem + '.')); return; }
+      if (!lista.length) { caixa.appendChild(el('div', 'vazio', 'Nada lançado hoje neste aparelho.')); return; }
       lista.forEach(function (x) {
         var c = el('div', 'cartao' + (x.desfeito ? ' desfeito' : ''));
         var topo = el('div', 'lanc');
