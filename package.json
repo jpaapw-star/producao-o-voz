@@ -1,6 +1,6 @@
 {
   "name": "producao-voz",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "private": true,
   "description": "Produção por voz — lançamento falado da produção na planilha (Google Apps Script)",
   "scripts": {
