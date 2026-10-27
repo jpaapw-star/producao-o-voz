@@ -28,7 +28,7 @@
   var LIGACOES = { de: 1, da: 1, do: 1, das: 1, dos: 1, para: 1, pra: 1, com: 1, e: 1, a: 1, o: 1, as: 1, os: 1 };
 
   var TIPOS = [
-    { campo: 'testados', re: /^(test|tst|validad|aprovad|conferid|checad)/ },
+    { campo: 'testados', re: /^(test|tst|aprovad|conferid|checad)/ },
     { campo: 'finalizados', re: /^(finaliz|final$|pront|termin|conclu|embalad)/ },
     { campo: 'defeitos', re: /^(defeit|queimad|estragad|quebrad|ruim|ruins|reprov)/ }
   ];
@@ -197,6 +197,16 @@
     var apelidos = montarDicionario(pessoas, categorias);
     var habitos = dados.habitos || {};   // { PESSOA: { categorias: [recentes...], tipo: 'finalizados'|null } }
     var ativos = dados.ativos || [];     // pessoas com lançamento nos últimos dias, mais recentes primeiro
+    // "notebooks validados" = categoria VALIDAÇÃO NOTEBOOK
+    var validacaoDe = {};
+    categorias.forEach(function (c) {
+      var k = chaves(c);
+      if (k[0] === chave('validacao') && k.length > 1) {
+        var base = k.slice(1).join(' ');
+        categorias.forEach(function (x) { if (chaves(x).join(' ') === base) validacaoDe[x] = c; });
+      }
+    });
+    function ehValidacao(c) { return /^valida/.test(normalizar(c)); }
 
     function escolherPessoa(opcoes, categoria) {
       if (opcoes.length === 1) return { valor: opcoes[0], suposto: false };
@@ -242,6 +252,7 @@
           i += achou.tamanho - 1;
           continue;
         }
+        if (/^valid/.test(f.palavra)) { eventos.push({ e: 'validar' }); conhecidos++; continue; }
         var t = tipoDe(f.palavra);
         if (t) { eventos.push({ e: 'tipo', campo: t }); conhecidos++; continue; }
         if (NEUTRA[f.palavra] || f.palavra.length < 3) continue;
@@ -318,6 +329,12 @@
           if (atual && (!atual.catEv || !atual.temQtd)) atual.catEv = ev;
           else nova(ev);
           carregar.forEach(function (p) { somar(atual, p.campo, p.v); });
+        } else if (ev.e === 'validar') {
+          // Troca a categoria da linha atual pela de validação, se existir.
+          if (atual && atual.catEv && atual.catEv.alvos.length) {
+            var trocadas = atual.catEv.alvos.map(function (c) { return validacaoDe[c]; }).filter(Boolean);
+            if (trocadas.length) atual.catEv = { e: 'cat', alvos: trocadas, dito: atual.catEv.dito + ' validados' };
+          }
         } else if (ev.e === 'num') {
           if (estilo === 'tipo') {
             if (esperando.length) {
@@ -330,6 +347,7 @@
           // Estilo "3 notebooks testados": o tipo vem depois (pulando a categoria).
           var j = i + 1, pulouCat = false;
           if (eventos[j] && eventos[j].e === 'cat') { j++; pulouCat = true; }
+          if (eventos[j] && eventos[j].e === 'validar') j++;
           if (eventos[j] && eventos[j].e === 'tipo') {
             eventos[j].usado = true; eventos[j].valor = ev.v;
             if (pulouCat) pendentes.push({ v: ev.v, campo: eventos[j].campo });
@@ -395,6 +413,11 @@
           if (p2) { r.pessoa = p2.valor; r.pessoaOpcoes = []; r.supostos.pessoa = true; }
         }
 
+        // Validação só tem testados ou defeitos: número sem tipo é testado.
+        if (r.categoria && ehValidacao(r.categoria) && r.semTipo.length) {
+          r.semTipo.forEach(function (v) { r.testados += v; });
+          r.semTipo = [];
+        }
         // Número dito sem "testados/finalizados": usa o costume da pessoa, se for claro.
         if (r.semTipo.length && r.pessoa && habitos[r.pessoa] && habitos[r.pessoa].tipo &&
             r.testados + r.finalizados + r.defeitos === 0 && r.semTipo.length === 1) {

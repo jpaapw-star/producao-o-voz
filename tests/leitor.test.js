@@ -106,9 +106,9 @@ test('Mariana de Paula (nome com "de")', () => {
   assert.deepStrictEqual(resumo(r), [['MARIANA DE PAULA', 'PERIFERICOS', 10, 0, 0]]);
 });
 
-test('frase do print: produto fora da lista, "testados e finalizados", "de feito" e "validados"', () => {
+test('frase do print: produto fora da lista, "testados e finalizados" e "de feito"', () => {
   const r = leitor({ categorias: categorias.concat(['TECLADO']) }).ler(
-    'Artur Antunes 3 webcams finalizadas 4 notebooks testados e finalizados 5 fones de feito e 3 teclados validados', '');
+    'Artur Antunes 3 webcams finalizadas 4 notebooks testados e finalizados 5 fones de feito e 3 teclados testados', '');
   assert.deepStrictEqual(resumo(r), [
     ['ARTUR ANTUNES', null, 0, 3, 0],
     ['ARTUR ANTUNES', 'NOTEBOOK', 4, 4, 0],
@@ -144,4 +144,16 @@ test('"esquece" descarta a frase', () => {
 test('conversa com número e muitas palavras estranhas é ignorada', () => {
   const r = leitor().ler('Julia roteador 4 testados. Amanhã chego umas 8 horas porque tenho médico', '');
   assert.deepStrictEqual(resumo(r), [['JULIA GOMES', 'ROTEADOR', 4, 0, 0]]);
+});
+
+test('validação é categoria: "notebooks validados" e "validação notebook" com testados ou defeitos', () => {
+  const l = leitor({ categorias: categorias.concat(['VALIDAÇÃO NOTEBOOK']) });
+  assert.deepStrictEqual(resumo(l.ler('Gabriel Vieira 6 notebooks validados 1 defeito', '')),
+    [['GABRIEL VIEIRA', 'VALIDAÇÃO NOTEBOOK', 6, 0, 1]]);
+  assert.deepStrictEqual(resumo(l.ler('Cauã validação notebook 4 testados 2 defeitos', '')),
+    [['CAUÃ ENRICO', 'VALIDAÇÃO NOTEBOOK', 4, 0, 2]]);
+  assert.deepStrictEqual(resumo(l.ler('Cauã validação de notebook 5', '')),
+    [['CAUÃ ENRICO', 'VALIDAÇÃO NOTEBOOK', 5, 0, 0]]);
+  // Notebook comum continua notebook.
+  assert.deepStrictEqual(resumo(l.ler('Ana Leal 2 notebooks finalizados', '')), [['ANA LEAL', 'NOTEBOOK', 0, 2, 0]]);
 });
