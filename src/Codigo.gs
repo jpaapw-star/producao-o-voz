@@ -10,8 +10,9 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.2.0';
+var VERSAO = '1.3.0';
 var LOG_ABA = 'Lançamentos por voz';
+var APELIDOS_ABA = 'Apelidos';
 var LOG_CABECALHO = ['ID', 'QUANDO', 'QUEM LANÇOU', 'O QUE FOI FALADO', 'LINHAS', 'DESFEITO EM'];
 var DESFAZER_MINUTOS = 30;
 var LINHAS_HISTORICO = 3000;
@@ -117,6 +118,24 @@ function listas_(ss) {
   return { pessoas: listaDaColuna_(cfgAba, colPessoas), categorias: listaDaColuna_(cfgAba, colCategorias) };
 }
 
+// Aba "Apelidos": APELIDO | NOME OU CATEGORIA. Criada vazia na primeira vez; você mesmo preenche.
+function apelidos_(ss, l) {
+  var aba = abaPorNome_(ss, APELIDOS_ABA);
+  if (!aba) {
+    aba = ss.insertSheet(APELIDOS_ABA, ss.getSheets().length);
+    aba.appendRow(['APELIDO', 'NOME OU CATEGORIA']);
+    aba.setFrozenRows(1);
+    return [];
+  }
+  var oficial = {};
+  l.pessoas.concat(l.categorias).forEach(function (x) { oficial[semAcento_(x)] = x; });
+  var n = aba.getLastRow();
+  if (n < 2) return [];
+  return aba.getRange(2, 1, n - 1, 2).getValues()
+    .map(function (r) { return [String(r[0]).trim(), oficial[semAcento_(r[1])]]; })
+    .filter(function (r) { return r[0] && r[1]; });
+}
+
 function ehData_(v) {
   return Object.prototype.toString.call(v) === '[object Date]';
 }
@@ -176,6 +195,7 @@ function apiInicio() {
     versao: VERSAO,
     pessoas: l.pessoas,
     categorias: l.categorias,
+    apelidos: apelidos_(ss, l),
     habitos: h.habitos,
     ativos: h.ativos,
     hora: Number(Utilities.formatDate(new Date(), tz, 'H'))

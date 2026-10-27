@@ -188,3 +188,10 @@ test('validação com finalizados é problema e quantidade alta vira aviso', () 
   assert.deepStrictEqual(L.avisos({ testados: 150, finalizados: 3, defeitos: 0 }), ['Confira: 150 testados é muito']);
   assert.deepStrictEqual(L.avisos({ testados: 100, finalizados: 3, defeitos: 0 }), []);
 });
+
+test('apelidos da aba Apelidos valem para pessoas e categorias', () => {
+  const l = L.criarLeitor({ pessoas, categorias: categorias.concat(['PLAYSTATION 5']), habitos: {}, ativos: [],
+    apelidos: [['Gabi', 'GABRIEL VIEIRA'], ['PS5', 'PLAYSTATION 5'], ['cam', 'NOTEBOOK'], ['Zé', 'FULANO FORA DA LISTA']] });
+  assert.deepStrictEqual(resumo(l.ler('Gabi 3 ps5 testados', 'JOÃO PEDRO')), [['GABRIEL VIEIRA', 'PLAYSTATION 5', 3, 0, 0]]);
+  assert.deepStrictEqual(resumo(l.ler('Gabi 3 PS 5 testados', 'JOÃO PEDRO')), [['GABRIEL VIEIRA', 'PLAYSTATION 5', 3, 0, 0]]);
+});

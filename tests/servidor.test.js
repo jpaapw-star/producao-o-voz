@@ -106,3 +106,13 @@ test('coluna de quantidade faltando no cabeçalho avisa em vez de gravar errado'
   const s = carregarServidor(p);
   assert.throws(() => s.apiGravar({ quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', testados: 1 }] }), /coluna de: defeitos/);
 });
+
+test('aba Apelidos é criada vazia e depois lida, só com nomes da lista', () => {
+  const p = planilha();
+  const s = carregarServidor(p);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().apelidos)), []);
+  const aba = p.getSheetByName('Apelidos');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(aba.dados[0])), ['APELIDO', 'NOME OU CATEGORIA']);
+  aba.dados.push(['Dani', 'daniel vargas'], ['som', 'CAIXA DE SOM'], ['Zé', 'FULANO'], ['', 'FONE']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().apelidos)), [['Dani', 'DANIEL VARGAS'], ['som', 'CAIXA DE SOM']]);
+});

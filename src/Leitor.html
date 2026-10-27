@@ -87,7 +87,7 @@
     return -1;
   }
 
-  function montarDicionario(pessoas, categorias) {
+  function montarDicionario(pessoas, categorias, extras) {
     var apelidos = [];
     var primeiros = {};
     pessoas.forEach(function (nome) {
@@ -115,6 +115,15 @@
       for (var i = 0; i + 1 < k.length; i++) {
         apelidos.push({ tipo: 'cat', alvo: cat, seq: k.slice(0, i).concat([chave(k[i] + k[i + 1])], k.slice(i + 2)), completo: true });
       }
+    });
+    // Aba "Apelidos" da planilha: "Gabi" → GABRIEL VIEIRA, "PS5" → PLAYSTATION 5.
+    (extras || []).forEach(function (a) {
+      var k = chaves(a[0]);
+      if (!k.length) return;
+      var tipo = pessoas.indexOf(a[1]) >= 0 ? 'pessoa' : categorias.indexOf(a[1]) >= 0 ? 'cat' : null;
+      if (!tipo) return;
+      apelidos.push({ tipo: tipo, alvo: a[1], seq: k, completo: true });
+      if (k.length > 1) apelidos.push({ tipo: tipo, alvo: a[1], seq: [chave(k.join(''))], completo: true });
     });
     return apelidos;
   }
@@ -198,7 +207,7 @@
     dados = dados || {};
     var pessoas = dados.pessoas || [];
     var categorias = dados.categorias || [];
-    var apelidos = montarDicionario(pessoas, categorias);
+    var apelidos = montarDicionario(pessoas, categorias, dados.apelidos);
     var habitos = dados.habitos || {};   // { PESSOA: { categorias: [recentes...], tipo: 'finalizados'|null } }
     var ativos = dados.ativos || [];     // pessoas com lançamento nos últimos dias, mais recentes primeiro
     // "notebooks validados" = categoria VALIDAÇÃO NOTEBOOK
