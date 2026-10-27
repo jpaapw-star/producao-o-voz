@@ -250,3 +250,22 @@ test('avisos: máximo da pessoa, tipo fora do costume e coisas deduzidas', () =>
   assert.deepStrictEqual(L.avisos({ pessoa: 'ANA LEAL', categoria: 'FONE', testados: 2, finalizados: 0, defeitos: 0, supostos: { pessoa: true, categoria: true } }, dados),
     ['Nome deduzido: confira', 'Categoria deduzida: confira']);
 });
+
+test('erros de escrita do ditado: "perfeito", "estados", "jogos", números escritos errado', () => {
+  const cats = ['FONE DE OUVIDO', 'TECLADO', 'VIDEO GAMES', 'NOTEBOOK', 'MOUSE', 'FONE'];
+  const l = L.criarLeitor({ pessoas: pessoas.concat(['MARIA GABRIELA']), categorias: cats, habitos: {}, ativos: [] });
+  const r = (t) => resumo(l.ler(t, 'JOÃO PEDRO'));
+  // Frase do print do João.
+  assert.deepStrictEqual(r('Maria Gabriela 2 testados fone de ouvido Um defeito 4 finalizados 2 teclados testados um teclado perfeito 3 teclados testados e finalizados Jogos um defeito e 2 estados'), [
+    ['MARIA GABRIELA', 'FONE DE OUVIDO', 2, 4, 1],
+    ['MARIA GABRIELA', 'TECLADO', 5, 3, 1],
+    ['MARIA GABRIELA', 'VIDEO GAMES', 2, 0, 1]
+  ]);
+  assert.deepStrictEqual(r('Julia 3 teclados finalisados 2 testadas 1 com efeito'), [['JULIA GOMES', 'TECLADO', 2, 3, 1]]);
+  assert.deepStrictEqual(r('Julia dose fones testados e treis defeituosos'), [['JULIA GOMES', 'FONE', 12, 0, 3]]);
+  assert.deepStrictEqual(r('Julia quarto notebooks testados'), [['JULIA GOMES', 'NOTEBOOK', 4, 0, 0]]);
+  // "quarto" sem categoria depois não é número; "estado" solto não copia quantidade.
+  assert.deepStrictEqual(r('Julia no quarto 3 notebooks testados'), [['JULIA GOMES', 'NOTEBOOK', 3, 0, 0]]);
+  assert.deepStrictEqual(r('Julia 3 mouses testados, estado de São Paulo'), [['JULIA GOMES', 'MOUSE', 3, 0, 0]]);
+  assert.deepStrictEqual(l.ler('tudo perfeito por aqui', 'JOÃO PEDRO').linhas, []);
+});

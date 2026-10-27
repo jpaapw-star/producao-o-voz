@@ -14,6 +14,11 @@
     dezessete: 17, dezoito: 18, dezenove: 19 };
   var DEZENAS = { vinte: 20, trinta: 30, quarenta: 40, cinquenta: 50, sessenta: 60, setenta: 70, oitenta: 80, noventa: 90 };
   var CENTENAS = { cem: 100, cento: 100, duzentos: 200, duzentas: 200, trezentos: 300, trezentas: 300 };
+  // Grafias erradas comuns do ditado e do teclado.
+  var ERRADOS = { treis: 3, trez: 3, seiz: 6, onse: 11, trese: 13, catorse: 14, quatorse: 14, quinse: 15,
+    dezeseis: 16, dezesete: 17, dezeoito: 18, dezenoue: 19, vinti: 20 };
+  // Palavras de verdade que soam como número: só contam como número antes de uma categoria ou de um tipo.
+  var PARECIDOS = { quarto: 4, dose: 12, cinto: 5, sei: 6, des: 10 };
 
   // Palavras que não mudam o sentido (artigos, ligações, verbos comuns do ditado).
   var NEUTRAS = ('e de da do das dos a o as os com sem para pra pro no na nos nas em um uma mais foi foram fez fiz fizeram ' +
@@ -69,7 +74,7 @@
   }
 
   function distancia(a, b) {
-    if (Math.abs(a.length - b.length) > 1) return 2;
+    if (Math.abs(a.length - b.length) > 2) return 9;
     var ant = [], i, j;
     for (j = 0; j <= b.length; j++) ant[j] = j;
     for (i = 1; i <= a.length; i++) {
@@ -83,9 +88,14 @@
   }
 
   // 0 = igual, 1 = parecido (um erro de ditado), -1 = diferente
-  function compara(a, b) {
+  function compara(a, b, nome) {
     if (a === b) return 0;
-    if (a.length >= 5 && b.length >= 5 && distancia(a, b) <= 1) return 1;
+    if (a.length >= 5 && b.length >= 5) {
+      var d = distancia(a, b);
+      if (d <= 1) return 1;
+      // Nome comprido aceita 2 letras erradas ("Grabriela" = GABRIELA).
+      if (nome && d === 2 && a.length >= 8 && b.length >= 8) return 2;
+    }
     return -1;
   }
 
@@ -118,6 +128,12 @@
         apelidos.push({ tipo: 'cat', alvo: cat, seq: k.slice(0, i).concat([chave(k[i] + k[i + 1])], k.slice(i + 2)), completo: true });
       }
     });
+    // "jogos" e "console" = categoria de video game, se a planilha não tiver categoria própria com essas palavras.
+    var games = categorias.filter(function (c) { return chaves(c).indexOf(chave('game')) >= 0; });
+    var temJogo = categorias.some(function (c) { var k = chaves(c); return k.indexOf(chave('jogo')) >= 0 || k.indexOf(chave('console')) >= 0; });
+    if (!temJogo) games.forEach(function (c) {
+      ['jogo', 'console', 'videogame', 'game'].forEach(function (w) { apelidos.push({ tipo: 'cat', alvo: c, seq: [chave(w)], completo: false }); });
+    });
     // Aba "Apelidos" da planilha: "Gabi" → GABRIEL VIEIRA, "PS5" → PLAYSTATION 5.
     (extras || []).forEach(function (a) {
       var k = chaves(a[0]);
@@ -149,6 +165,11 @@
         valor = ESPECIAIS[p];
       } else if (UNIDADES[p] !== undefined) {
         valor = UNIDADES[p];
+      } else if (ERRADOS[p] !== undefined) {
+        valor = ERRADOS[p];
+      } else if (PARECIDOS[p] !== undefined) {
+        saida.push({ num: PARECIDOS[p], orig: p, parecido: true });
+        continue;
       }
       if (valor === null) { saida.push(p); continue; }
       saida.push({ num: valor, orig: palavras.slice(i, i + usados).join(' ') });
@@ -170,9 +191,28 @@
     return null;
   }
 
+  // Formas certas de cada tipo, para aceitar o que o ditado escreve parecido ("estados", "perfeito", "finalisados").
+  var FORMAS_TIPO = {
+    testados: ['testado', 'testados', 'testada', 'testadas', 'teste', 'testes'],
+    finalizados: ['finalizado', 'finalizados', 'finalizada', 'finalizadas'],
+    defeitos: ['defeito', 'defeitos', 'defeituoso', 'defeituosos']
+  };
+  var TIPO_OUVIDO = { efeito: 'defeitos', efeitos: 'defeitos', perfeito: 'defeitos', perfeitos: 'defeitos',
+    refeito: 'defeitos', desfeito: 'defeitos', estado: 'testados', estados: 'testados', textado: 'testados', textados: 'testados' };
   function tipoDe(p) {
     for (var i = 0; i < TIPOS.length; i++) if (TIPOS[i].re.test(p)) return TIPOS[i].campo;
     return null;
+  }
+  function tipoParecido(p) {
+    if (TIPO_OUVIDO[p]) return TIPO_OUVIDO[p];
+    if (p.length < 6) return null;
+    var achado = null;
+    Object.keys(FORMAS_TIPO).forEach(function (campo) {
+      FORMAS_TIPO[campo].forEach(function (forma) {
+        if (!achado && distancia(p, forma) <= (p.length >= 8 ? 2 : 1)) achado = campo;
+      });
+    });
+    return achado;
   }
 
   // "meia dúzia" = 6, "2 dúzias" = 24; horário ("às 9", "na hora das nove", "das 9 às 10") não é quantidade.
@@ -206,11 +246,11 @@
   function casar(fichas, i, apelidos) {
     var melhores = [], melhorNota = -1, melhorTamanho = 0;
     // "mouses" pode ser MOUSE (só tira o s) e não "mous"; o ditado também separa "web cans" = WEBCAM.
-    function custo(f, alvo) {
+    function custo(f, alvo, nome) {
       if (!f || f.chave === undefined) return -1;
-      var c = compara(f.chave, alvo);
+      var c = compara(f.chave, alvo, nome);
       if (f.alt !== undefined) {
-        var c2 = compara(f.alt, alvo);
+        var c2 = compara(f.alt, alvo, nome);
         if (c2 >= 0 && (c < 0 || c2 < c)) c = c2;
       }
       return c;
@@ -219,7 +259,7 @@
       var erros = 0, pos = i;
       for (var n = 0; n < a.seq.length; n++) {
         var f = fichas[pos], g = fichas[pos + 1];
-        var c = custo(f, a.seq[n]);
+        var c = custo(f, a.seq[n], a.tipo === 'pessoa');
         if (c !== 0 && f && g && f.palavra && g.palavra) {
           var junto = f.palavra + g.palavra;
           var cj = custo({ chave: chave(junto), alt: altChave(junto) }, a.seq[n]);
@@ -312,13 +352,13 @@
       var brutos = ajustarNumeros(lerNumeros(palavras));
       var fichas = brutos.filter(function (b) { return typeof b === 'object' || !LIGACOES[b]; }).map(function (b) {
         // O número também tem "chave", para casar com categorias como "PLAYSTATION 5".
-        if (typeof b === 'object') return { num: b.num, orig: b.orig, chave: String(b.num) };
+        if (typeof b === 'object') return { num: b.num, orig: b.orig, chave: String(b.num), parecido: b.parecido };
         return { palavra: b, chave: chave(b), alt: altChave(b) };
       });
       var eventos = [], naoEntendi = [], conhecidos = 0, cancelou = false, candidatoNome = null;
       for (var i = 0; i < fichas.length; i++) {
         var f = fichas[i];
-        if (f.num !== undefined) { eventos.push({ e: 'num', v: f.num, fraco: /^(um|uma)$/.test(f.orig) }); continue; }
+        if (f.num !== undefined) { eventos.push({ e: 'num', v: f.num, parecido: f.parecido, fraco: f.parecido || /^(um|uma)$/.test(f.orig) }); continue; }
         if (CANCELAR.test(f.palavra)) { cancelou = true; continue; }
         // "3 notebooks, não, 4": o número seguinte troca o anterior.
         // "não" só corrige quando vem número logo depois; "não teve defeito" apaga o tipo negado.
@@ -344,8 +384,9 @@
           continue;
         }
         if (/^valid/.test(f.palavra)) { eventos.push({ e: 'validar' }); conhecidos++; continue; }
-        var t = tipoDe(f.palavra);
-        if (t) { eventos.push({ e: 'tipo', campo: t }); conhecidos++; continue; }
+        var t = tipoDe(f.palavra), parecido = false;
+        if (!t) { t = tipoParecido(f.palavra); parecido = !!t; }
+        if (t) { eventos.push({ e: 'tipo', campo: t, parecido: parecido }); conhecidos++; continue; }
         if (NEUTRA[f.palavra] || OUTRO_DIA.test(f.palavra) || f.palavra.length < 3) continue;
         // Palavra desconhecida logo depois de um número ("3 webcams"): é um produto fora da lista.
         var anterior = eventos[eventos.length - 1];
@@ -358,6 +399,12 @@
         }
       }
       eventos = aplicarCorrecoes(eventos);
+      // "quarto", "dose" só são número se vier categoria ou tipo logo depois.
+      eventos = eventos.filter(function (e, k) {
+        if (e.e !== 'num' || !e.parecido) return true;
+        var prox = eventos[k + 1];
+        return prox && (prox.e === 'tipo' || (prox.e === 'cat' && !prox.desconhecida));
+      });
       if (candidatoNome && !eventos.some(function (e) { return e.e === 'pessoa'; }) &&
           eventos.some(function (e) { return e.e === 'num'; })) {
         eventos.unshift({ e: 'pessoa', alvos: [], dito: candidatoNome, desconhecida: true });
@@ -482,7 +529,7 @@
           }
           if (ev.usado) return;
           // "4 testados e finalizados": o mesmo número vale para os dois.
-          if (antes && antes.e === 'tipo' && antes.usado) {
+          if (antes && antes.e === 'tipo' && antes.usado && !ev.parecido) {
             ev.usado = true; ev.valor = antes.valor;
             somar(garantir(), ev.campo, antes.valor);
           }
