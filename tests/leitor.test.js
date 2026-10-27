@@ -105,3 +105,43 @@ test('Mariana de Paula (nome com "de")', () => {
   const r = leitor().ler('Mariana de Paula periféricos 10 testados', '');
   assert.deepStrictEqual(resumo(r), [['MARIANA DE PAULA', 'PERIFERICOS', 10, 0, 0]]);
 });
+
+test('frase do print: produto fora da lista, "testados e finalizados", "de feito" e "validados"', () => {
+  const r = leitor({ categorias: categorias.concat(['TECLADO']) }).ler(
+    'Artur Antunes 3 webcams finalizadas 4 notebooks testados e finalizados 5 fones de feito e 3 teclados validados', '');
+  assert.deepStrictEqual(resumo(r), [
+    ['ARTUR ANTUNES', null, 0, 3, 0],
+    ['ARTUR ANTUNES', 'NOTEBOOK', 4, 4, 0],
+    ['ARTUR ANTUNES', 'FONE', 0, 0, 5],
+    ['ARTUR ANTUNES', 'TECLADO', 3, 0, 0]
+  ]);
+  assert.match(r.linhas[0].problemas[0], /webcams/);
+  assert.deepStrictEqual(r.naoEntendi, []);
+});
+
+test('"testados e finalizados 4" (tipo antes do número) vale para os dois', () => {
+  const r = leitor().ler('Julia roteador testados e finalizados 4', '');
+  assert.deepStrictEqual(resumo(r), [['JULIA GOMES', 'ROTEADOR', 4, 4, 0]]);
+});
+
+test('conversa paralela no meio é ignorada', () => {
+  const r = leitor().ler('Ana Leal notebook 3 testados. Ô Julia, você viu onde ficou a chave do armário? ' +
+    'Pega lá pra mim por favor. Daniel caixa de som 2 finalizados', '');
+  assert.deepStrictEqual(resumo(r), [['ANA LEAL', 'NOTEBOOK', 3, 0, 0], ['DANIEL VARGAS', 'CAIXA DE SOM', 0, 2, 0]]);
+  assert.strictEqual(r.ignorados.length, 2);
+});
+
+test('nome dito na conversa não rouba os números de quem estava sendo lançado', () => {
+  const r = leitor().ler('Daniel caixa de som 2 finalizados. Julia espera um pouco. 3 testados', '');
+  assert.deepStrictEqual(resumo(r), [['DANIEL VARGAS', 'CAIXA DE SOM', 3, 2, 0]]);
+});
+
+test('"esquece" descarta a frase', () => {
+  const r = leitor().ler('Julia roteador 4 testados. Não, 5 testados, esquece. Ana Leal notebook 1 finalizado', '');
+  assert.deepStrictEqual(resumo(r), [['JULIA GOMES', 'ROTEADOR', 4, 0, 0], ['ANA LEAL', 'NOTEBOOK', 0, 1, 0]]);
+});
+
+test('conversa com número e muitas palavras estranhas é ignorada', () => {
+  const r = leitor().ler('Julia roteador 4 testados. Amanhã chego umas 8 horas porque tenho médico', '');
+  assert.deepStrictEqual(resumo(r), [['JULIA GOMES', 'ROTEADOR', 4, 0, 0]]);
+});

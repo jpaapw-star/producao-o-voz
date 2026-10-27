@@ -28,8 +28,8 @@
   var LIGACOES = { de: 1, da: 1, do: 1, das: 1, dos: 1, para: 1, pra: 1, com: 1, e: 1, a: 1, o: 1, as: 1, os: 1 };
 
   var TIPOS = [
-    { campo: 'testados', re: /^(test|tst)/ },
-    { campo: 'finalizados', re: /^(finaliz|final$|pront|termin|conclu|feito|feitos|feita|feitas)/ },
+    { campo: 'testados', re: /^(test|tst|validad|aprovad|conferid|checad)/ },
+    { campo: 'finalizados', re: /^(finaliz|final$|pront|termin|conclu|embalad)/ },
     { campo: 'defeitos', re: /^(defeit|queimad|estragad|quebrad|ruim|ruins|reprov)/ }
   ];
 
@@ -216,35 +216,68 @@
       return null;
     }
 
-    function ler(texto, eu) {
-      var palavras = normalizar(texto).split(' ').filter(Boolean);
+    // Separa o texto em frases e descarta as que parecem conversa paralela.
+    var CANCELAR = /^(esquece|esqueca|ignora|ignore|cancela|cancelar|desconsidera|apaga|apagar)$/;
+
+    function eventosDaFrase(frase, eu) {
+      var palavras = normalizar(frase)
+        .replace(/\b(de|com) (feito|feitos|feita|feitas)\b/g, 'defeito')
+        .split(' ').filter(Boolean);
       var brutos = lerNumeros(palavras);
       var fichas = brutos.filter(function (b) { return typeof b === 'object' || !LIGACOES[b]; }).map(function (b) {
         if (typeof b === 'object') return { num: b.num, orig: b.orig };
         return { palavra: b, chave: chave(b) };
       });
-
-      // 1) eventos: pessoa, categoria, número, tipo
-      var eventos = [], naoEntendi = [];
+      var eventos = [], naoEntendi = [], conhecidos = 0, cancelou = false;
       for (var i = 0; i < fichas.length; i++) {
         var f = fichas[i];
-        if (f.num !== undefined) { eventos.push({ e: 'num', v: f.num }); continue; }
+        if (f.num !== undefined) { eventos.push({ e: 'num', v: f.num, fraco: /^(um|uma)$/.test(f.orig) }); continue; }
+        if (CANCELAR.test(f.palavra)) { cancelou = true; continue; }
         if (f.palavra === 'eu' || f.palavra === 'mim') { eventos.push({ e: 'pessoa', alvos: eu ? [eu] : [], eu: true, dito: f.palavra }); continue; }
         var achou = casar(fichas, i, apelidos);
         if (achou) {
           var dito = fichas.slice(i, i + achou.tamanho).map(function (x) { return x.palavra; }).join(' ');
           eventos.push({ e: achou.tipo, alvos: achou.alvos, dito: dito });
+          conhecidos++;
           i += achou.tamanho - 1;
           continue;
         }
         var t = tipoDe(f.palavra);
-        if (t) { eventos.push({ e: 'tipo', campo: t }); continue; }
-        if (!NEUTRA[f.palavra] && f.palavra.length >= 3) naoEntendi.push(f.palavra);
+        if (t) { eventos.push({ e: 'tipo', campo: t }); conhecidos++; continue; }
+        if (NEUTRA[f.palavra] || f.palavra.length < 3) continue;
+        // Palavra desconhecida logo depois de um número ("3 webcams"): é um produto fora da lista.
+        var anterior = eventos[eventos.length - 1];
+        if (anterior && anterior.e === 'num' && f.palavra.length >= 4) {
+          eventos.push({ e: 'cat', alvos: [], dito: f.palavra, desconhecida: true });
+        } else naoEntendi.push(f.palavra);
       }
+      // "um pouco", "uma hora" não contam como quantidade; "um notebook" conta.
+      var temNumero = eventos.some(function (e, k) {
+        var prox = eventos[k + 1];
+        return e.e === 'num' && (!e.fraco || (prox && (prox.e === 'cat' && !prox.desconhecida || prox.e === 'tipo')));
+      });
+      var estranhas = naoEntendi.length + eventos.filter(function (e) { return e.desconhecida; }).length;
+      var conversa = cancelou || !temNumero || (estranhas >= 3 && estranhas > conhecidos);
+      return { eventos: eventos, naoEntendi: naoEntendi, conversa: conversa };
+    }
+
+    function ler(texto, eu) {
+      var eventos = [], naoEntendi = [], ignorados = [];
+      String(texto || '').split(/[.!;\n]+/).forEach(function (pedaco) {
+        // Pergunta ("pode me passar a chave?") é conversa, não produção.
+        pedaco.split(/\?/).forEach(function (frase, k, lista) {
+          if (!frase.trim()) return;
+          var pergunta = k < lista.length - 1;
+          var r = eventosDaFrase(frase, eu);
+          if (pergunta || r.conversa) { ignorados.push(frase.trim()); return; }
+          r.eventos.forEach(function (e) { eventos.push(e); });
+          r.naoEntendi.forEach(function (p) { naoEntendi.push(p); });
+        });
+      });
 
       // 2) monta as linhas
       var linhas = [];
-      var pessoaEv = null, atual = null, pendentes = [], esperando = null;
+      var pessoaEv = null, atual = null, pendentes = [], esperando = [], estilo = null;
 
       function nova(catEv) {
         atual = { pessoaEv: pessoaEv, catEv: catEv || null, testados: 0, finalizados: 0, defeitos: 0, semTipo: [], temQtd: false };
@@ -252,41 +285,79 @@
         return atual;
       }
       function garantir() { return atual || nova(null); }
+      function somar(l, campo, v) {
+        if (campo) l[campo] += v; else l.semTipo.push(v);
+        l.temQtd = true;
+      }
       function soltarPendentes() {
         if (pendentes.length) {
           var l = garantir();
-          pendentes.forEach(function (v) { l.semTipo.push(v); l.temQtd = true; });
+          pendentes.forEach(function (p) { somar(l, p.campo, p.v); });
           pendentes = [];
         }
-        esperando = null;
+        esperando = [];
+      }
+      // "3 testados" (número antes) ou "testados 3" (tipo antes): decide pelo que vem primeiro depois do nome.
+      function estiloDesde(i) {
+        for (var j = i; j < eventos.length && eventos[j].e !== 'pessoa'; j++) {
+          if (eventos[j].e === 'num') return 'numero';
+          if (eventos[j].e === 'tipo') return 'tipo';
+        }
+        return 'numero';
       }
 
-      eventos.forEach(function (ev) {
+      estilo = estiloDesde(0);
+      eventos.forEach(function (ev, i) {
+        var antes = eventos[i - 1], depois = eventos[i + 1];
         if (ev.e === 'pessoa') {
           soltarPendentes();
           pessoaEv = ev; atual = null;
+          estilo = estiloDesde(i + 1);
         } else if (ev.e === 'cat') {
-          if (atual && !atual.catEv) atual.catEv = ev;
-          else if (atual && atual.catEv && !atual.temQtd) atual.catEv = ev;
-          else {
-            var carregar = pendentes; pendentes = [];
-            if (atual) { esperando = null; }
-            nova(ev);
-            pendentes = carregar;
-          }
+          var carregar = pendentes; pendentes = [];
+          if (atual && (!atual.catEv || !atual.temQtd)) atual.catEv = ev;
+          else nova(ev);
+          carregar.forEach(function (p) { somar(atual, p.campo, p.v); });
         } else if (ev.e === 'num') {
-          if (esperando) { var l = garantir(); l[esperando] += ev.v; l.temQtd = true; esperando = null; }
-          else pendentes.push(ev.v);
-        } else if (ev.e === 'tipo') {
-          if (pendentes.length) {
-            var l2 = garantir();
-            var v = pendentes.pop();
-            pendentes.forEach(function (x) { l2.semTipo.push(x); });
-            pendentes = [];
-            l2[ev.campo] += v; l2.temQtd = true;
-            esperando = null;
+          if (estilo === 'tipo') {
+            if (esperando.length) {
+              var l = garantir();
+              esperando.forEach(function (campo) { somar(l, campo, ev.v); });
+              esperando = [];
+            } else pendentes.push({ v: ev.v, campo: null });
+            return;
+          }
+          // Estilo "3 notebooks testados": o tipo vem depois (pulando a categoria).
+          var j = i + 1, pulouCat = false;
+          if (eventos[j] && eventos[j].e === 'cat') { j++; pulouCat = true; }
+          if (eventos[j] && eventos[j].e === 'tipo') {
+            eventos[j].usado = true; eventos[j].valor = ev.v;
+            if (pulouCat) pendentes.push({ v: ev.v, campo: eventos[j].campo });
+            else somar(garantir(), eventos[j].campo, ev.v);
+          } else if (antes && antes.e === 'tipo' && !antes.usado) {
+            antes.usado = true; antes.valor = ev.v;
+            somar(garantir(), antes.campo, ev.v);
+          } else if (pulouCat) {
+            pendentes.push({ v: ev.v, campo: null });
           } else {
-            esperando = ev.campo;
+            somar(garantir(), null, ev.v);
+          }
+        } else if (ev.e === 'tipo') {
+          if (estilo === 'tipo') {
+            if (pendentes.length) {
+              var p = pendentes.pop();
+              var l2 = garantir();
+              pendentes.forEach(function (x) { somar(l2, null, x.v); });
+              pendentes = [];
+              somar(l2, ev.campo, p.v);
+            } else esperando.push(ev.campo);
+            return;
+          }
+          if (ev.usado) return;
+          // "4 testados e finalizados": o mesmo número vale para os dois.
+          if (antes && antes.e === 'tipo' && antes.usado) {
+            ev.usado = true; ev.valor = antes.valor;
+            somar(garantir(), ev.campo, antes.valor);
           }
         }
       });
@@ -309,7 +380,9 @@
         var p = escolherPessoa(opcoesPessoa, catOpcoes.length === 1 ? catOpcoes[0] : null);
         if (p) { r.pessoa = p.valor; if (p.suposto) r.supostos.pessoa = true; } else r.pessoaOpcoes = opcoesPessoa.slice();
 
-        if (catOpcoes.length) {
+        if (l.catEv && l.catEv.desconhecida) {
+          r.categoriaDesconhecida = true;
+        } else if (catOpcoes.length) {
           var c = escolherCategoria(catOpcoes, r.pessoa);
           if (c) { r.categoria = c.valor; if (c.suposto) r.supostos.categoria = true; } else r.categoriaOpcoes = catOpcoes.slice();
         } else if (r.pessoa && habitos[r.pessoa] && (habitos[r.pessoa].categorias || []).length) {
@@ -343,7 +416,7 @@
       });
 
       unidas.forEach(function (r) { r.problemas = problemas(r); });
-      return { linhas: unidas, naoEntendi: naoEntendi };
+      return { linhas: unidas, naoEntendi: naoEntendi, ignorados: ignorados };
     }
 
     return { ler: ler, problemas: problemas };
@@ -352,7 +425,11 @@
   function problemas(r) {
     var lista = [];
     if (!r.pessoa) lista.push(r.pessoaOpcoes && r.pessoaOpcoes.length ? 'Qual ' + (r.ditoPessoa || 'pessoa') + '?' : 'Falta o nome');
-    if (!r.categoria) lista.push(r.categoriaOpcoes && r.categoriaOpcoes.length ? 'Qual categoria?' : 'Falta a categoria');
+    if (!r.categoria) {
+      if (r.categoriaOpcoes && r.categoriaOpcoes.length) lista.push('Qual categoria?');
+      else if (r.categoriaDesconhecida) lista.push('“' + r.ditoCategoria + '” não está nas categorias. Toque para escolher.');
+      else lista.push('Falta a categoria');
+    }
     if (r.semTipo && r.semTipo.length) lista.push('Testados, finalizados ou defeitos?');
     if (!(r.semTipo && r.semTipo.length) && r.testados + r.finalizados + r.defeitos === 0) lista.push('Falta a quantidade');
     return lista;
