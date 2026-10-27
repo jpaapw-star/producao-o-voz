@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Produção">
+<style>
+  :root {
+    --fundo: #f2f2f7; --cartao: #ffffff; --texto: #000000; --sec: #6e6e73; --ter: #aeaeb2;
+    --linha: #d1d1d6; --botao: #000000; --botao-texto: #ffffff; --campo: #e9e9ee;
+    --erro: #d70015; --ok: #248a3d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fundo: #000000; --cartao: #1c1c1e; --texto: #ffffff; --sec: #98989d; --ter: #636366;
+      --linha: #38383a; --botao: #ffffff; --botao-texto: #000000; --campo: #2c2c2e;
+      --erro: #ff453a; --ok: #30d158;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--fundo); color: var(--texto); }
+  body { font: 17px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) 16px calc(110px + env(safe-area-inset-bottom)); max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.5px; margin: 18px 0 4px; }
+  .topo { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+  .pilula { border: 0; background: var(--campo); color: var(--texto); font: inherit; font-size: 15px; font-weight: 600;
+    padding: 7px 14px; border-radius: 999px; cursor: pointer; white-space: nowrap; max-width: 55vw; overflow: hidden; text-overflow: ellipsis; }
+  .faixa { display: flex; align-items: center; gap: 6px; color: var(--sec); font-size: 15px; margin: 6px 0 14px; }
+  .faixa button { border: 0; background: none; color: var(--texto); font-size: 22px; width: 36px; height: 32px; cursor: pointer; }
+  .faixa strong { color: var(--texto); font-weight: 600; font-variant-numeric: tabular-nums; }
+  textarea { width: 100%; min-height: 120px; border: 0; border-radius: 14px; background: var(--cartao); color: var(--texto);
+    font: inherit; font-size: 19px; padding: 14px; resize: vertical; outline: none; }
+  textarea::placeholder { color: var(--ter); }
+  .dica { color: var(--sec); font-size: 13px; margin: 8px 4px 18px; }
+  .cartao { background: var(--cartao); border-radius: 14px; padding: 14px; margin-bottom: 10px; }
+  .nome { font-weight: 600; font-size: 17px; display: table; cursor: pointer; }
+  .cat { color: var(--sec); font-size: 15px; margin-top: 1px; display: table; cursor: pointer; }
+  .suposto { border-bottom: 1px dashed var(--ter); }
+  .qtds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .qtd { background: var(--campo); border-radius: 10px; padding: 6px 8px; text-align: center; }
+  .qtd label { display: block; font-size: 11px; color: var(--sec); text-transform: uppercase; letter-spacing: .4px; }
+  .qtd input { width: 100%; border: 0; background: none; color: var(--texto); font: inherit; font-size: 22px; font-weight: 600;
+    text-align: center; outline: none; font-variant-numeric: tabular-nums; }
+  .qtd.zero input { color: var(--ter); font-weight: 400; }
+  .duvida { margin-top: 10px; font-size: 14px; color: var(--erro); }
+  .opcoes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .opcoes button { border: 1px solid var(--linha); background: none; color: var(--texto); font: inherit; font-size: 14px;
+    padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+  select.trocar { margin-top: 6px; width: 100%; font: inherit; font-size: 15px; padding: 8px; border-radius: 10px;
+    border: 1px solid var(--linha); background: var(--cartao); color: var(--texto); }
+  .remover { float: right; border: 0; background: none; color: var(--ter); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 0 0 10px; }
+  .naoentendi { color: var(--sec); font-size: 13px; margin: 4px 4px 10px; }
+  .rodape { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, var(--fundo) 70%, transparent); }
+  .rodape button { display: block; width: 100%; max-width: 608px; margin: 0 auto; border: 0; border-radius: 14px;
+    background: var(--botao); color: var(--botao-texto); font: inherit; font-size: 17px; font-weight: 600; padding: 16px; cursor: pointer; }
+  .rodape button:disabled { opacity: .3; cursor: default; }
+  .aviso { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(90px + env(safe-area-inset-bottom));
+    background: var(--texto); color: var(--fundo); border-radius: 14px; padding: 12px 16px; font-size: 15px;
+    display: none; align-items: center; gap: 16px; max-width: calc(100% - 32px); box-shadow: 0 6px 24px rgba(0,0,0,.2); }
+  .aviso button { border: 0; background: none; color: var(--fundo); font: inherit; font-weight: 700; cursor: pointer; }
+  .tela { display: none; }
+  .tela.ativa { display: block; }
+  .campo { width: 100%; border: 0; border-radius: 12px; background: var(--cartao); color: var(--texto); font: inherit;
+    font-size: 19px; padding: 14px; outline: none; }
+  .lista { background: var(--cartao); border-radius: 14px; overflow: hidden; margin-top: 12px; }
+  .lista button { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--linha);
+    background: none; color: var(--texto); font: inherit; padding: 13px 14px; cursor: pointer; }
+  .lista button:last-child { border-bottom: 0; }
+  .sub { color: var(--sec); font-size: 15px; margin: 0 0 16px; }
+  .erro { color: var(--erro); font-size: 15px; margin-top: 10px; min-height: 20px; }
+  .carregando { color: var(--sec); text-align: center; margin-top: 40vh; }
+  .vazio { color: var(--ter); text-align: center; font-size: 15px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div id="tCarregando" class="tela ativa"><div class="carregando">Abrindo…</div></div>
+
+<div id="tCodigo" class="tela">
+  <h1>Produção</h1>
+  <p class="sub">Digite o código da equipe. Você só faz isso uma vez neste celular.</p>
+  <input id="codigo" class="campo" type="password" autocomplete="off" autocapitalize="off" placeholder="Código da equipe">
+  <div id="erroCodigo" class="erro"></div>
+  <div class="rodape"><button id="entrar">Entrar</button></div>
+</div>
+
+<div id="tQuem" class="tela">
+  <h1>Quem é você?</h1>
+  <p class="sub">Quando você falar sem dizer um nome, a produção vai para você.</p>
+  <input id="busca" class="campo" placeholder="Buscar nome" autocomplete="off">
+  <div id="listaPessoas" class="lista"></div>
+</div>
+
+<div id="tLancar" class="tela">
+  <div class="topo">
+    <h1>Produção</h1>
+    <button id="trocarQuem" class="pilula" title="Trocar quem está lançando"></button>
+  </div>
+  <div class="faixa">
+    <button id="faixaMenos" aria-label="Hora anterior">‹</button>
+    <strong id="faixa"></strong>
+    <button id="faixaMais" aria-label="Próxima hora">›</button>
+  </div>
+  <textarea id="fala" placeholder="Ex.: Ana Leal notebook 3 testados 2 finalizados. Julia roteador 4 testados."></textarea>
+  <div class="dica">Toque no microfone do teclado e fale. Pode falar várias pessoas de uma vez.</div>
+  <div id="naoEntendi" class="naoentendi"></div>
+  <div id="previa"></div>
+  <div class="rodape"><button id="gravar" disabled>Gravar</button></div>
+</div>
+
+<div id="aviso" class="aviso"><span id="avisoTexto"></span><button id="desfazer">Desfazer</button></div>
+
+<?!= incluir_('Leitor') ?>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var guardar = {
+    ler: function (k) { try { return localStorage.getItem('producao.' + k) || ''; } catch (e) { return ''; } },
+    por: function (k, v) { try { localStorage.setItem('producao.' + k, v); } catch (e) {} },
+    tirar: function (k) { try { localStorage.removeItem('producao.' + k); } catch (e) {} }
+  };
+  var estado = { codigo: guardar.ler('codigo'), quem: guardar.ler('quem'), dados: null, leitor: null,
+    hora: null, linhas: [], ajustes: {}, ultimo: null, gravando: false };
+
+  function tela(id) {
+    ['tCarregando', 'tCodigo', 'tQuem', 'tLancar'].forEach(function (t) { $(t).classList.toggle('ativa', t === id); });
+  }
+
+  function chamar(nome) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (ok, falha) {
+      var r = google.script.run.withSuccessHandler(ok).withFailureHandler(falha);
+      r[nome].apply(r, args);
+    });
+  }
+
+  function mensagem(e) { return String((e && e.message) || e || 'Erro').replace(/^Error:\s*/, ''); }
+
+  /* ---------- entrada ---------- */
+  function iniciar() {
+    if (!estado.codigo) { tela('tCodigo'); $('codigo').focus(); return; }
+    tela('tCarregando');
+    chamar('apiInicio', estado.codigo).then(function (d) {
+      estado.dados = d;
+      estado.leitor = LeitorProducao.criarLeitor(d);
+      estado.hora = d.hora;
+      if (!estado.quem || d.pessoas.indexOf(estado.quem) < 0) { mostrarPessoas(); return; }
+      abrirLancar();
+    }).catch(function (e) {
+      if (mensagem(e) === 'CODIGO_ERRADO') {
+        guardar.tirar('codigo'); estado.codigo = '';
+        tela('tCodigo'); $('erroCodigo').textContent = 'Código errado.';
+      } else {
+        tela('tCodigo'); $('erroCodigo').textContent = mensagem(e);
+      }
+    });
+  }
+
+  $('entrar').onclick = function () {
+    var c = $('codigo').value.trim();
+    if (!c) return;
+    estado.codigo = c; guardar.por('codigo', c); $('erroCodigo').textContent = '';
+    iniciar();
+  };
+  $('codigo').onkeydown = function (e) { if (e.key === 'Enter') $('entrar').click(); };
+
+  function mostrarPessoas() {
+    tela('tQuem');
+    $('busca').value = '';
+    desenharPessoas('');
+  }
+  function desenharPessoas(filtro) {
+    var f = LeitorProducao.normalizar(filtro);
+    var lista = $('listaPessoas');
+    lista.innerHTML = '';
+    estado.dados.pessoas.filter(function (p) { return !f || LeitorProducao.normalizar(p).indexOf(f) >= 0; })
+      .forEach(function (p) {
+        var b = document.createElement('button');
+        b.textContent = p;
+        b.onclick = function () { estado.quem = p; guardar.por('quem', p); abrirLancar(); };
+        lista.appendChild(b);
+      });
+  }
+  $('busca').oninput = function () { desenharPessoas(this.value); };
+  $('trocarQuem').onclick = mostrarPessoas;
+
+  /* ---------- lançar ---------- */
+  function abrirLancar() {
+    tela('tLancar');
+    $('trocarQuem').textContent = estado.quem;
+    desenharFaixa();
+    atualizar();
+  }
+
+  function desenharFaixa() {
+    var dois = function (n) { return ('0' + ((n + 24) % 24)).slice(-2) + ':00'; };
+    $('faixa').textContent = dois(estado.hora) + ' – ' + dois(estado.hora + 1);
+  }
+  $('faixaMenos').onclick = function () { estado.hora = (estado.hora + 23) % 24; desenharFaixa(); };
+  $('faixaMais').onclick = function () { estado.hora = (estado.hora + 1) % 24; desenharFaixa(); };
+
+  var espera = null;
+  $('fala').oninput = function () { clearTimeout(espera); espera = setTimeout(atualizar, 150); };
+
+  function chaveLinha(l, i) { return i + '|' + l.ditoPessoa + '|' + l.ditoCategoria; }
+
+  function atualizar() {
+    var r = estado.leitor.ler($('fala').value, estado.quem);
+    estado.linhas = r.linhas.map(function (l, i) {
+      var aj = estado.ajustes[chaveLinha(l, i)];
+      if (aj) Object.keys(aj).forEach(function (k) { l[k] = aj[k]; });
+      l.problemas = LeitorProducao.problemas(l);
+      l.chave = chaveLinha(l, i);
+      return l;
+    }).filter(function (l) { return !l.removida; });
+    $('naoEntendi').textContent = r.naoEntendi.length ? 'Não entendi: ' + r.naoEntendi.join(', ') : '';
+    desenhar();
+  }
+
+  function ajustar(l, mudancas) {
+    var aj = estado.ajustes[l.chave] || (estado.ajustes[l.chave] = {});
+    Object.keys(mudancas).forEach(function (k) { aj[k] = mudancas[k]; });
+    atualizar();
+  }
+
+  function el(tag, classe, texto) {
+    var e = document.createElement(tag);
+    if (classe) e.className = classe;
+    if (texto !== undefined) e.textContent = texto;
+    return e;
+  }
+
+  function desenhar() {
+    var caixa = $('previa');
+    caixa.innerHTML = '';
+    if (!estado.linhas.length) {
+      if ($('fala').value.trim()) caixa.appendChild(el('div', 'vazio', 'Fale um nome, a categoria e as quantidades.'));
+    }
+    estado.linhas.forEach(function (l) {
+      var c = el('div', 'cartao');
+      var x = el('button', 'remover', '×');
+      x.setAttribute('aria-label', 'Tirar esta linha');
+      x.onclick = function () { ajustar(l, { removida: true }); };
+      c.appendChild(x);
+
+      var nome = el('div', 'nome', l.pessoa || (l.ditoPessoa ? '“' + l.ditoPessoa + '”' : 'Sem nome'));
+      if (l.supostos.pessoa && l.pessoa) nome.classList.add('suposto');
+      nome.onclick = function () { trocar(c, 'pessoa', estado.dados.pessoas, l); };
+      c.appendChild(nome);
+
+      var cat = el('div', 'cat', l.categoria || (l.ditoCategoria ? '“' + l.ditoCategoria + '”' : 'Sem categoria'));
+      if (l.supostos.categoria && l.categoria) cat.classList.add('suposto');
+      cat.onclick = function () { trocar(c, 'categoria', estado.dados.categorias, l); };
+      c.appendChild(cat);
+
+      var q = el('div', 'qtds');
+      [['testados', 'Testados'], ['finalizados', 'Finalizados'], ['defeitos', 'Defeitos']].forEach(function (par) {
+        var caixaQ = el('div', 'qtd' + (l[par[0]] ? '' : ' zero'));
+        var rot = el('label', '', par[1]);
+        var inp = el('input');
+        inp.type = 'number'; inp.inputMode = 'numeric'; inp.min = 0; inp.value = l[par[0]];
+        inp.onchange = function () { var m = {}; m[par[0]] = Math.max(0, parseInt(inp.value, 10) || 0); ajustar(l, m); };
+        caixaQ.appendChild(rot); caixaQ.appendChild(inp);
+        if (l.supostos.tipo === par[0]) rot.classList.add('suposto');
+        q.appendChild(caixaQ);
+      });
+      c.appendChild(q);
+
+      if (!l.pessoa && l.pessoaOpcoes.length) c.appendChild(opcoes('Quem?', l.pessoaOpcoes, function (v) { ajustar(l, { pessoa: v, pessoaOpcoes: [] }); }));
+      if (!l.categoria && l.categoriaOpcoes.length) c.appendChild(opcoes('Qual categoria?', l.categoriaOpcoes, function (v) { ajustar(l, { categoria: v, categoriaOpcoes: [] }); }));
+      if (l.semTipo.length) {
+        var n = l.semTipo[0];
+        c.appendChild(opcoes(n + ' são…', ['testados', 'finalizados', 'defeitos'], function (v) {
+          var m = { semTipo: l.semTipo.slice(1) }; m[v] = l[v] + n; ajustar(l, m);
+        }));
+      }
+      var outros = l.problemas.filter(function (p) {
+        return !(/^Qual|^Testados/.test(p));
+      });
+      if (outros.length) c.appendChild(el('div', 'duvida', outros.join(' · ')));
+      caixa.appendChild(c);
+    });
+    var prontas = estado.linhas.filter(function (l) { return !l.problemas.length; }).length;
+    var b = $('gravar');
+    var todas = estado.linhas.length;
+    b.disabled = estado.gravando || !todas || prontas !== todas;
+    b.textContent = estado.gravando ? 'Gravando…' : (todas ? 'Gravar ' + todas + (todas === 1 ? ' linha' : ' linhas') : 'Gravar');
+  }
+
+  function opcoes(titulo, lista, escolher) {
+    var d = el('div');
+    d.appendChild(el('div', 'duvida', titulo));
+    var o = el('div', 'opcoes');
+    lista.forEach(function (v) {
+      var b = el('button', '', v.toLowerCase().replace(/(^|\s)(\S)/g, function (m, a, c) { return a + c.toUpperCase(); }));
+      b.onclick = function () { escolher(v); };
+      o.appendChild(b);
+    });
+    d.appendChild(o);
+    return d;
+  }
+
+  function trocar(cartao, campo, lista, l) {
+    if (cartao.querySelector('select')) return;
+    var s = el('select', 'trocar');
+    s.appendChild(el('option', '', campo === 'pessoa' ? 'Escolher pessoa…' : 'Escolher categoria…'));
+    lista.forEach(function (v) { var o = el('option', '', v); o.value = v; if (v === l[campo]) o.selected = true; s.appendChild(o); });
+    s.onchange = function () {
+      var m = {}; m[campo] = s.value; m[campo === 'pessoa' ? 'pessoaOpcoes' : 'categoriaOpcoes'] = [];
+      var sup = {}; Object.keys(l.supostos).forEach(function (k) { sup[k] = l.supostos[k]; }); delete sup[campo];
+      m.supostos = sup;
+      ajustar(l, m);
+    };
+    cartao.appendChild(s);
+    s.focus();
+  }
+
+  $('gravar').onclick = function () {
+    if (estado.gravando) return;
+    estado.gravando = true; desenhar();
+    var pedido = {
+      quem: estado.quem, hora: estado.hora, texto: $('fala').value,
+      linhas: estado.linhas.map(function (l) {
+        return { pessoa: l.pessoa, categoria: l.categoria, testados: l.testados, finalizados: l.finalizados, defeitos: l.defeitos };
+      })
+    };
+    chamar('apiGravar', estado.codigo, pedido).then(function (r) {
+      estado.gravando = false;
+      estado.ultimo = r.id;
+      $('fala').value = ''; estado.ajustes = {};
+      atualizar();
+      avisar('Gravado: ' + r.n + (r.n === 1 ? ' linha' : ' linhas') + ' · ' + r.faixa, true);
+    }).catch(function (e) {
+      estado.gravando = false; desenhar();
+      if (mensagem(e) === 'CODIGO_ERRADO') { guardar.tirar('codigo'); estado.codigo = ''; iniciar(); return; }
+      avisar('Não gravou: ' + mensagem(e), false);
+    });
+  };
+
+  var timerAviso = null;
+  function avisar(texto, podeDesfazer) {
+    $('avisoTexto').textContent = texto;
+    $('desfazer').style.display = podeDesfazer ? '' : 'none';
+    $('aviso').style.display = 'flex';
+    clearTimeout(timerAviso);
+    timerAviso = setTimeout(function () { $('aviso').style.display = 'none'; }, podeDesfazer ? 15000 : 6000);
+  }
+
+  $('desfazer').onclick = function () {
+    var id = estado.ultimo;
+    if (!id) return;
+    $('desfazer').style.display = 'none';
+    $('avisoTexto').textContent = 'Desfazendo…';
+    chamar('apiDesfazer', estado.codigo, id).then(function (r) {
+      estado.ultimo = null;
+      avisar(r.naoAchadas ? 'Desfeito em parte: ' + r.naoAchadas + ' linha(s) já tinham mudado.' : 'Desfeito.', false);
+    }).catch(function (e) { avisar('Não desfez: ' + mensagem(e), false); });
+  };
+
+  iniciar();
+})();
+</script>
+</body>
+</html>

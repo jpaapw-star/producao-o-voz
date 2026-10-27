@@ -1,0 +1,82 @@
+# Envia src/ para o Apps Script e atualiza o app da Web sempre que a branch main muda.
+# Configuração única (veja docs/INSTALACAO.md):
+#   segredo CLASPRC_JSON  : o mesmo conteúdo usado nos repositórios do Preço Médio e da Memória Global
+#   segredo PLANILHA_ID   : ID da planilha de produção
+#   segredo CODIGO_EQUIPE : código que a equipe digita no celular
+# Na primeira vez o projeto do Apps Script é criado sozinho e o .clasp.json volta para o repositório.
+name: Apps Script
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: apps-script
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+
+  enviar:
+    needs: testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Preparar clasp e segredos
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          PLANILHA_ID: ${{ secrets.PLANILHA_ID }}
+          CODIGO_EQUIPE: ${{ secrets.CODIGO_EQUIPE }}
+        run: |
+          for s in CLASPRC_JSON PLANILHA_ID CODIGO_EQUIPE; do
+            if [ -z "${!s}" ]; then echo "::error::Falta o segredo $s (veja docs/INSTALACAO.md)."; exit 1; fi
+          done
+          npm install -g @google/clasp@2.4.2
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          node -e '
+            const id = process.env.PLANILHA_ID.trim().replace(/^.*\/d\/([^/]+).*$/, "$1");
+            const s = { planilhaId: id, codigoEquipe: process.env.CODIGO_EQUIPE.trim() };
+            require("fs").writeFileSync("src/00_Segredos.gs", "var SEGREDOS = " + JSON.stringify(s) + ";\n");
+          '
+      - name: Criar o projeto do Apps Script (só na primeira vez)
+        run: |
+          if [ ! -f .clasp.json ]; then
+            clasp create --type standalone --title "Produção por voz" --rootDir src
+            node -e 'const f=".clasp.json";const c=JSON.parse(require("fs").readFileSync(f));require("fs").writeFileSync(f,JSON.stringify({scriptId:c.scriptId,rootDir:"src"},null,2)+"\n")'
+            git checkout -- src/appsscript.json 2>/dev/null || true
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .clasp.json
+            git commit -m "Liga o repositório ao projeto do Apps Script criado"
+            git push
+          fi
+          cat .clasp.json
+      - name: Enviar código
+        run: clasp push --force
+      - name: Atualizar o app da Web
+        run: |
+          DEP=$(clasp deployments | grep -v '@HEAD' | grep -o 'AKfyc[A-Za-z0-9_-]*' | head -1 || true)
+          if [ -n "$DEP" ]; then
+            clasp deploy --deploymentId "$DEP" --description "GitHub ${GITHUB_SHA::7}"
+          else
+            clasp deploy --description "GitHub ${GITHUB_SHA::7}"
+            DEP=$(clasp deployments | grep -v '@HEAD' | grep -o 'AKfyc[A-Za-z0-9_-]*' | head -1 || true)
+          fi
+          echo "App da Web: https://script.google.com/macros/s/$DEP/exec" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Apagar credenciais
+        if: always()
+        run: rm -f ~/.clasprc.json src/00_Segredos.gs
