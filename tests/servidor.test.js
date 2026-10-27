@@ -115,4 +115,35 @@ test('aba Apelidos é criada vazia e depois lida, só com nomes da lista', () =>
   assert.deepStrictEqual(JSON.parse(JSON.stringify(aba.dados[0])), ['APELIDO', 'NOME OU CATEGORIA']);
   aba.dados.push(['Dani', 'daniel vargas'], ['som', 'CAIXA DE SOM'], ['Zé', 'FULANO'], ['', 'FONE']);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().apelidos)), [['Dani', 'DANIEL VARGAS'], ['som', 'CAIXA DE SOM']]);
+  assert.deepStrictEqual(aba.dados.map((l) => l[2]), ['SITUAÇÃO', 'ok', 'ok', 'não achei esse nome em Configurações', 'falta o apelido']);
+});
+
+test('início traz supervisores e máximos da Referência Metas', () => {
+  const p = planilha();
+  p.getSheetByName('Configurações').dados[2][1] = 'SUPERVISOR';
+  p.insertSheet('Referência Metas').dados.push(['PESSOA', 'CATEGORIA', 'META SUGERIDA', 'MÉDIA HIST.', 'MIN HIST.', 'MAX HIST.'], ['ANA LEAL', 'NOTEBOOK', 24, 22.5, 20, 25]);
+  const d = JSON.parse(JSON.stringify(carregarServidor(p).apiInicio()));
+  assert.deepStrictEqual(d.supervisores, ['DANIEL VARGAS']);
+  assert.deepStrictEqual(d.maximos, { 'ANA LEAL|NOTEBOOK': 25 });
+});
+
+test('grava abaixo de linha que outro app escreveu, e lista e desfaz lançamentos de hoje', () => {
+  const p = planilha();
+  const s = carregarServidor(p);
+  const reg = p.getSheetByName('Registros');
+  // Simula o outro app escrevendo na linha 5 sem a nossa leitura ver (pula a busca da última linha).
+  const original = reg.getLastRow;
+  let chamadas = 0;
+  reg.getLastRow = () => (chamadas++ === 0 ? 4 : original());
+  reg.dados.push(['Outubro/2026', 'x', '10:00', 'BRUNO', 'FONE', 1, 0, 0, '10:00', '11:00']);
+  const r = s.apiGravar({ quem: 'ANA LEAL', hora: 10, linhas: [{ pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', testados: 1 }] });
+  reg.getLastRow = original;
+  assert.strictEqual(reg.dados[4][3], 'BRUNO');
+  assert.strictEqual(reg.dados[5][3], 'ANA LEAL');
+  const hoje = JSON.parse(JSON.stringify(s.apiHoje('ana leal')));
+  assert.strictEqual(hoje.length, 1);
+  assert.strictEqual(hoje[0].id, r.id);
+  assert.deepStrictEqual(hoje[0].linhas[0], { pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', testados: 1, finalizados: 0, defeitos: 0, faixa: '10:00 – 11:00' });
+  s.apiDesfazer(r.id);
+  assert.strictEqual(JSON.parse(JSON.stringify(s.apiHoje('ANA LEAL')))[0].desfeito, true);
 });

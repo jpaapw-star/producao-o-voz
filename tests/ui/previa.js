@@ -26,9 +26,10 @@ const html = fs.readFileSync(path.join(raiz, 'Index.html'), 'utf8')
   for (const tema of ['light', 'dark']) {
     const pg = await nav.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: tema });
     await pg.route('http://previa.local/', (r) => r.fulfill({ contentType: 'text/html', body: html }));
+    pg.on('pageerror', (e) => console.error('ERRO NA PÁGINA:', e.message));
     await pg.goto('http://previa.local/');
     await pg.waitForSelector('#tLancar.ativa');
-    await pg.fill('#fala', 'Artur Antunes 3 webcams finalizadas 4 notebooks testados e finalizados 5 fones de feito e 3 teclados validados. Ô Julia, você viu a chave do armário? Daniel 4');
+    await pg.fill('#fala', 'Artur Antunes 3 webcams finalizadas 4 notebooks testados e finalizados 5 fones de feito. Causa 2 teclados testados ontem. Ô Julia, você viu a chave do armário? Daniel 4');
     await pg.dispatchEvent('#fala', 'input');
     await pg.waitForTimeout(400);
     await pg.screenshot({ path: path.join(saida, 'tela-' + tema + '.png'), fullPage: true });

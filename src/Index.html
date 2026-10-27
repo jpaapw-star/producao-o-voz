@@ -50,6 +50,8 @@
   select.trocar { margin-top: 6px; width: 100%; font: inherit; font-size: 15px; padding: 8px; border-radius: 10px;
     border: 1px solid var(--linha); background: var(--cartao); color: var(--texto); }
   .remover { float: right; border: 0; background: none; color: var(--ter); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 0 0 10px; }
+  .geral { color: var(--texto); font-size: 14px; margin: 4px 4px 10px; }
+  .geral:empty { display: none; }
   .naoentendi { color: var(--sec); font-size: 13px; margin: 4px 4px 10px; }
   .rodape { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
     background: linear-gradient(to top, var(--fundo) 70%, transparent); }
@@ -72,6 +74,14 @@
   .erro { color: var(--erro); font-size: 15px; margin-top: 10px; min-height: 20px; }
   .carregando { color: var(--sec); text-align: center; margin-top: 40vh; }
   .vazio { color: var(--ter); text-align: center; font-size: 15px; margin-top: 8px; }
+  .link { display: block; margin: 18px auto 0; border: 0; background: none; color: var(--sec); font: inherit; font-size: 15px;
+    text-decoration: underline; cursor: pointer; }
+  .lanc { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .lanc button { border: 1px solid var(--linha); background: none; color: var(--texto); font: inherit; font-size: 14px;
+    padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+  .lanc .hora { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .item { color: var(--sec); font-size: 15px; margin-top: 4px; }
+  .desfeito { opacity: .45; }
 </style>
 </head>
 <body>
@@ -86,7 +96,7 @@
 
 <div id="tQuem" class="tela">
   <h1>Quem é você?</h1>
-  <p class="sub">Quando você falar sem dizer um nome, a produção vai para você.</p>
+  <p class="sub">Quando você falar sem dizer um nome, a produção vai para você. Supervisor: o app pergunta de quem é.</p>
   <input id="busca" class="campo" placeholder="Buscar nome" autocomplete="off">
   <div id="listaPessoas" class="lista"></div>
 </div>
@@ -103,10 +113,21 @@
   </div>
   <textarea id="fala" placeholder="Ex.: Ana Leal notebook 3 testados 2 finalizados. Julia roteador 4 testados."></textarea>
   <div class="dica">No celular, toque no microfone do teclado. No PC, aperte Windows + H. Pode falar várias pessoas de uma vez. Conversa no meio é ignorada, e "esquece" apaga a frase.</div>
+  <div id="avisosGerais" class="geral"></div>
   <div id="naoEntendi" class="naoentendi"></div>
   <div id="ignorados" class="naoentendi"></div>
   <div id="previa"></div>
+  <button id="abrirHoje" class="link">Meus lançamentos de hoje</button>
   <div class="rodape"><button id="gravar" disabled>Gravar</button></div>
+</div>
+
+<div id="tHoje" class="tela">
+  <div class="topo">
+    <h1>Hoje</h1>
+    <button id="voltarHoje" class="pilula">Voltar</button>
+  </div>
+  <p class="sub">O que você lançou hoje. Desfazer apaga só as linhas daquele lançamento.</p>
+  <div id="listaHoje"></div>
 </div>
 
 <div id="aviso" class="aviso"><span id="avisoTexto"></span><button id="desfazer">Desfazer</button></div>
@@ -125,7 +146,7 @@
     hora: null, linhas: [], ajustes: {}, ultimo: null, gravando: false };
 
   function tela(id) {
-    ['tCarregando', 'tErro', 'tQuem', 'tLancar'].forEach(function (t) { $(t).classList.toggle('ativa', t === id); });
+    ['tCarregando', 'tErro', 'tQuem', 'tLancar', 'tHoje'].forEach(function (t) { $(t).classList.toggle('ativa', t === id); });
   }
 
   function chamar(nome) {
@@ -227,10 +248,11 @@
       var aj = estado.ajustes[chaveLinha(l, i)];
       if (aj) Object.keys(aj).forEach(function (k) { l[k] = aj[k]; });
       l.problemas = LeitorProducao.problemas(l);
-      l.avisos = LeitorProducao.avisos(l);
+      l.avisos = LeitorProducao.avisos(l, estado.dados);
       l.chave = chaveLinha(l, i);
       return l;
     }).filter(function (l) { return !l.removida; });
+    $('avisosGerais').textContent = (r.avisos || []).join(' ');
     $('naoEntendi').textContent = r.naoEntendi.length ? 'Não entendi: ' + r.naoEntendi.join(', ') : '';
     $('ignorados').textContent = r.ignorados.length ? 'Ignorado (conversa): ' + r.ignorados.map(function (f) { return '“' + f + '”'; }).join(' ') : '';
     desenhar();
@@ -375,16 +397,51 @@
   }
   $('desfazer').onclick = function () { if (acaoAviso) acaoAviso(); };
 
-  function desfazer() {
-    var id = estado.ultimo;
+  function desfazer(id, depois) {
+    id = typeof id === 'string' ? id : estado.ultimo;
     if (!id) return;
     $('desfazer').style.display = 'none';
     $('avisoTexto').textContent = 'Desfazendo…';
+    $('aviso').style.display = 'flex';
     chamar('apiDesfazer', id).then(function (r) {
-      estado.ultimo = null;
+      if (id === estado.ultimo) estado.ultimo = null;
       avisar(r.naoAchadas ? 'Desfeito em parte: ' + r.naoAchadas + ' linha(s) já tinham mudado.' : 'Desfeito.');
+      if (depois) depois();
     }).catch(function (e) { avisar('Não desfez: ' + mensagem(e)); });
   }
+
+  /* ---------- lançamentos de hoje ---------- */
+  function abrirHoje() {
+    tela('tHoje');
+    var caixa = $('listaHoje');
+    caixa.innerHTML = '';
+    caixa.appendChild(el('div', 'vazio', 'Carregando…'));
+    chamar('apiHoje', estado.quem).then(function (lista) {
+      caixa.innerHTML = '';
+      if (!lista.length) { caixa.appendChild(el('div', 'vazio', 'Nada lançado hoje por ' + estado.quem + '.')); return; }
+      lista.forEach(function (x) {
+        var c = el('div', 'cartao' + (x.desfeito ? ' desfeito' : ''));
+        var topo = el('div', 'lanc');
+        topo.appendChild(el('span', 'hora', x.hora + (x.desfeito ? ' · desfeito' : '')));
+        if (!x.desfeito) {
+          var b = el('button', '', 'Desfazer');
+          b.onclick = function () { b.disabled = true; desfazer(x.id, abrirHoje); };
+          topo.appendChild(b);
+        }
+        c.appendChild(topo);
+        x.linhas.forEach(function (l) {
+          var q = [];
+          if (l.testados) q.push(l.testados + ' testados');
+          if (l.finalizados) q.push(l.finalizados + ' finalizados');
+          if (l.defeitos) q.push(l.defeitos + ' defeitos');
+          c.appendChild(el('div', 'item', l.pessoa + ' · ' + l.categoria + ' · ' + q.join(', ') + ' · ' + l.faixa));
+        });
+        caixa.appendChild(c);
+      });
+    }).catch(function (e) { caixa.innerHTML = ''; caixa.appendChild(el('div', 'erro', mensagem(e))); });
+  }
+  $('abrirHoje').onclick = abrirHoje;
+  $('voltarHoje').onclick = function () { tela('tLancar'); };
 
   iniciar();
 })();
