@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.0.1';
+var VERSAO = '1.1.0';
 var LOG_ABA = 'Lançamentos por voz';
 var LOG_CABECALHO = ['ID', 'QUANDO', 'QUEM LANÇOU', 'O QUE FOI FALADO', 'LINHAS', 'DESFEITO EM'];
 var DESFAZER_MINUTOS = 30;

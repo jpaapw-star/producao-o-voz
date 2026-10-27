@@ -104,8 +104,9 @@
     <button id="faixaMais" aria-label="Próxima hora">›</button>
   </div>
   <textarea id="fala" placeholder="Ex.: Ana Leal notebook 3 testados 2 finalizados. Julia roteador 4 testados."></textarea>
-  <div class="dica">Toque no microfone do teclado e fale. Pode falar várias pessoas de uma vez.</div>
+  <div class="dica">No celular, toque no microfone do teclado. No PC, aperte Windows + H. Pode falar várias pessoas de uma vez. Conversa no meio é ignorada, e "esquece" apaga a frase.</div>
   <div id="naoEntendi" class="naoentendi"></div>
+  <div id="ignorados" class="naoentendi"></div>
   <div id="previa"></div>
   <div class="rodape"><button id="gravar" disabled>Gravar</button></div>
 </div>
@@ -217,6 +218,7 @@
       return l;
     }).filter(function (l) { return !l.removida; });
     $('naoEntendi').textContent = r.naoEntendi.length ? 'Não entendi: ' + r.naoEntendi.join(', ') : '';
+    $('ignorados').textContent = r.ignorados.length ? 'Ignorado (conversa): ' + r.ignorados.map(function (f) { return '“' + f + '”'; }).join(' ') : '';
     desenhar();
   }
 
