@@ -1,0 +1,365 @@
+<script>
+/*
+ * Leitor de produção falada.
+ * Transforma uma frase ditada ("Ana Leal notebook 3 testados 2 finalizados. Julia roteador 4 testados")
+ * em linhas { pessoa, categoria, testados, finalizados, defeitos } usando as listas da planilha.
+ * Roda no navegador (prévia ao vivo) e nos testes em Node. Não usa IA.
+ */
+(function (raiz) {
+  'use strict';
+
+  var UNIDADES = { zero: 0, nenhum: 0, nenhuma: 0, um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5,
+    seis: 6, sete: 7, oito: 8, nove: 9 };
+  var ESPECIAIS = { dez: 10, onze: 11, doze: 12, treze: 13, quatorze: 14, catorze: 14, quinze: 15, dezesseis: 16,
+    dezessete: 17, dezoito: 18, dezenove: 19 };
+  var DEZENAS = { vinte: 20, trinta: 30, quarenta: 40, cinquenta: 50, sessenta: 60, setenta: 70, oitenta: 80, noventa: 90 };
+  var CENTENAS = { cem: 100, cento: 100, duzentos: 200, duzentas: 200, trezentos: 300, trezentas: 300 };
+
+  // Palavras que não mudam o sentido (artigos, ligações, verbos comuns do ditado).
+  var NEUTRAS = ('e de da do das dos a o as os com sem para pra pro no na nos nas em um uma mais foi foram fez fiz fizeram ' +
+    'teve tem tinha unidade unidades peca pecas item itens hoje hora agora ja so ponto virgula sendo que total ' +
+    'ele ela eles elas la aqui depois tambem ok entao ai ate dele dela deles delas cada quantidade qtd ficou ficaram ' +
+    'esta estao seu sua meu minha produziu produzi produção producao lancar lanca anota anotar coloca colocar bota botar ' +
+    'mais isso esse essa este esta outro outra outros outras ainda certo beleza blz por favor').split(' ');
+  var NEUTRA = {};
+  NEUTRAS.forEach(function (p) { NEUTRA[p] = true; });
+
+  // Palavras que somem também dos nomes e categorias antes de comparar.
+  var LIGACOES = { de: 1, da: 1, do: 1, das: 1, dos: 1, para: 1, pra: 1, com: 1, e: 1, a: 1, o: 1, as: 1, os: 1 };
+
+  var TIPOS = [
+    { campo: 'testados', re: /^(test|tst)/ },
+    { campo: 'finalizados', re: /^(finaliz|final$|pront|termin|conclu|feito|feitos|feita|feitas)/ },
+    { campo: 'defeitos', re: /^(defeit|queimad|estragad|quebrad|ruim|ruins|reprov)/ }
+  ];
+
+  function semAcento(s) {
+    return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+
+  function normalizar(s) {
+    return semAcento(s).toLowerCase()
+      .replace(/(\d)([a-z])/g, '$1 $2').replace(/([a-z])(\d)/g, '$1 $2')
+      .replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  function singular(p) {
+    if (p.length <= 3 || /^\d+$/.test(p)) return p;
+    if (/oes$|aes$/.test(p)) return p.slice(0, -3) + 'ao';
+    if (/[rsz]es$/.test(p)) return p.slice(0, -2);
+    if (/ns$/.test(p)) return p.slice(0, -2) + 'm';
+    if (/ais$/.test(p)) return p.slice(0, -2) + 'l';
+    if (/s$/.test(p) && !/ss$/.test(p)) return p.slice(0, -1);
+    return p;
+  }
+
+  // Aproxima grafias que soam igual (Arthur/Artur, Thiago/Tiago, Kauã/Cauã, Isabella/Isabela).
+  function som(p) {
+    return p.replace(/th/g, 't').replace(/ph/g, 'f').replace(/y/g, 'i').replace(/w/g, 'v')
+      .replace(/k/g, 'c').replace(/ch/g, 'x').replace(/sh/g, 'x').replace(/h/g, '')
+      .replace(/(.)\1+/g, '$1');
+  }
+
+  function chave(p) { return som(singular(p)); }
+
+  function chaves(texto) {
+    return normalizar(texto).split(' ').filter(function (p) { return p && !LIGACOES[p]; }).map(chave);
+  }
+
+  function distancia(a, b) {
+    if (Math.abs(a.length - b.length) > 1) return 2;
+    var ant = [], i, j;
+    for (j = 0; j <= b.length; j++) ant[j] = j;
+    for (i = 1; i <= a.length; i++) {
+      var atual = [i];
+      for (j = 1; j <= b.length; j++) {
+        atual[j] = Math.min(ant[j] + 1, atual[j - 1] + 1, ant[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      }
+      ant = atual;
+    }
+    return ant[b.length];
+  }
+
+  // 0 = igual, 1 = parecido (um erro de ditado), -1 = diferente
+  function compara(a, b) {
+    if (a === b) return 0;
+    if (a.length >= 5 && b.length >= 5 && distancia(a, b) <= 1) return 1;
+    return -1;
+  }
+
+  function montarDicionario(pessoas, categorias) {
+    var apelidos = [];
+    var primeiros = {};
+    pessoas.forEach(function (nome) {
+      var k = chaves(nome);
+      if (k.length) primeiros[k[0]] = (primeiros[k[0]] || 0) + 1;
+    });
+    pessoas.forEach(function (nome) {
+      var k = chaves(nome);
+      if (!k.length) return;
+      apelidos.push({ tipo: 'pessoa', alvo: nome, seq: k, completo: true });
+      if (k.length > 1) {
+        apelidos.push({ tipo: 'pessoa', alvo: nome, seq: [k[0]], completo: false });
+        if (k.length > 2) apelidos.push({ tipo: 'pessoa', alvo: nome, seq: [k[0], k[1]], completo: false });
+        // Sobrenome sozinho só vale se for comprido e não for o primeiro nome de alguém.
+        var ultimo = k[k.length - 1];
+        if (ultimo.length >= 5 && !primeiros[ultimo]) apelidos.push({ tipo: 'pessoa', alvo: nome, seq: [ultimo], completo: false, fraco: true });
+      }
+    });
+    categorias.forEach(function (cat) {
+      var k = chaves(cat);
+      if (!k.length) return;
+      apelidos.push({ tipo: 'cat', alvo: cat, seq: k, completo: true });
+      if (k.length > 1) apelidos.push({ tipo: 'cat', alvo: cat, seq: [k[0]], completo: false });
+    });
+    return apelidos;
+  }
+
+  // Junta "vinte e cinco" em 25 e "3" em 3.
+  function lerNumeros(palavras) {
+    var saida = [];
+    for (var i = 0; i < palavras.length; i++) {
+      var p = palavras[i];
+      if (/^\d+$/.test(p)) { saida.push({ num: parseInt(p, 10), orig: p }); continue; }
+      var valor = null, usados = 1;
+      if (CENTENAS[p] !== undefined) {
+        valor = CENTENAS[p];
+        var resto = lerResto(palavras, i + 1, true);
+        if (resto) { valor += resto.valor; usados += resto.usados; }
+      } else if (DEZENAS[p] !== undefined) {
+        valor = DEZENAS[p];
+        var r2 = lerResto(palavras, i + 1, false);
+        if (r2) { valor += r2.valor; usados += r2.usados; }
+      } else if (ESPECIAIS[p] !== undefined) {
+        valor = ESPECIAIS[p];
+      } else if (UNIDADES[p] !== undefined) {
+        valor = UNIDADES[p];
+      }
+      if (valor === null) { saida.push(p); continue; }
+      saida.push({ num: valor, orig: palavras.slice(i, i + usados).join(' ') });
+      i += usados - 1;
+    }
+    return saida;
+  }
+
+  function lerResto(palavras, j, aceitaDezena) {
+    var pulo = palavras[j] === 'e' ? 1 : 0;
+    var p = palavras[j + pulo];
+    if (p === undefined) return null;
+    if (aceitaDezena && DEZENAS[p] !== undefined) {
+      var mais = lerResto(palavras, j + pulo + 1, false);
+      return { valor: DEZENAS[p] + (mais ? mais.valor : 0), usados: pulo + 1 + (mais ? mais.usados : 0) };
+    }
+    if (aceitaDezena && ESPECIAIS[p] !== undefined) return { valor: ESPECIAIS[p], usados: pulo + 1 };
+    if (UNIDADES[p] !== undefined && UNIDADES[p] > 0 && (pulo || !aceitaDezena)) return { valor: UNIDADES[p], usados: pulo + 1 };
+    return null;
+  }
+
+  function tipoDe(p) {
+    for (var i = 0; i < TIPOS.length; i++) if (TIPOS[i].re.test(p)) return TIPOS[i].campo;
+    return null;
+  }
+
+  // Procura o nome/categoria mais comprido que começa na posição i.
+  function casar(fichas, i, apelidos) {
+    var melhores = [], melhorNota = -1;
+    apelidos.forEach(function (a) {
+      var erros = 0;
+      for (var n = 0; n < a.seq.length; n++) {
+        var f = fichas[i + n];
+        if (!f || f.chave === undefined) return;
+        var c = compara(f.chave, a.seq[n]);
+        if (c < 0) return;
+        erros += c;
+      }
+      if (a.fraco && erros) return;
+      var nota = a.seq.length * 10 + (a.completo ? 5 : 0) - erros * 3 - (a.fraco ? 4 : 0);
+      if (nota > melhorNota) { melhorNota = nota; melhores = [a]; } else if (nota === melhorNota) melhores.push(a);
+    });
+    if (!melhores.length) return null;
+    var alvos = [];
+    melhores.forEach(function (a) { if (alvos.indexOf(a.alvo) < 0) alvos.push(a.alvo); });
+    var tipo = melhores[0].tipo;
+    // Pessoa e categoria empatadas: vale a categoria.
+    var tipos = melhores.map(function (a) { return a.tipo; });
+    if (tipos.indexOf('pessoa') >= 0 && tipos.indexOf('cat') >= 0) {
+      var soCat = melhores.filter(function (a) { return a.tipo === 'cat'; });
+      tipo = 'cat';
+      alvos = soCat.map(function (a) { return a.alvo; }).filter(function (v, k, l) { return l.indexOf(v) === k; });
+    }
+    return { tipo: tipo, alvos: alvos, tamanho: melhores[0].seq.length };
+  }
+
+  function criarLeitor(dados) {
+    dados = dados || {};
+    var pessoas = dados.pessoas || [];
+    var categorias = dados.categorias || [];
+    var apelidos = montarDicionario(pessoas, categorias);
+    var habitos = dados.habitos || {};   // { PESSOA: { categorias: [recentes...], tipo: 'finalizados'|null } }
+    var ativos = dados.ativos || [];     // pessoas com lançamento nos últimos dias, mais recentes primeiro
+
+    function escolherPessoa(opcoes, categoria) {
+      if (opcoes.length === 1) return { valor: opcoes[0], suposto: false };
+      if (categoria) {
+        var porCat = opcoes.filter(function (p) { return habitos[p] && (habitos[p].categorias || []).indexOf(categoria) >= 0; });
+        if (porCat.length === 1) return { valor: porCat[0], suposto: true };
+      }
+      var porAtivo = opcoes.filter(function (p) { return ativos.indexOf(p) >= 0; });
+      if (porAtivo.length === 1) return { valor: porAtivo[0], suposto: true };
+      return null;
+    }
+
+    function escolherCategoria(opcoes, pessoa) {
+      if (opcoes.length === 1) return { valor: opcoes[0], suposto: false };
+      var recentes = (pessoa && habitos[pessoa] && habitos[pessoa].categorias) || [];
+      for (var i = 0; i < recentes.length; i++) if (opcoes.indexOf(recentes[i]) >= 0) return { valor: recentes[i], suposto: true };
+      return null;
+    }
+
+    function ler(texto, eu) {
+      var palavras = normalizar(texto).split(' ').filter(Boolean);
+      var brutos = lerNumeros(palavras);
+      var fichas = brutos.filter(function (b) { return typeof b === 'object' || !LIGACOES[b]; }).map(function (b) {
+        if (typeof b === 'object') return { num: b.num, orig: b.orig };
+        return { palavra: b, chave: chave(b) };
+      });
+
+      // 1) eventos: pessoa, categoria, número, tipo
+      var eventos = [], naoEntendi = [];
+      for (var i = 0; i < fichas.length; i++) {
+        var f = fichas[i];
+        if (f.num !== undefined) { eventos.push({ e: 'num', v: f.num }); continue; }
+        if (f.palavra === 'eu' || f.palavra === 'mim') { eventos.push({ e: 'pessoa', alvos: eu ? [eu] : [], eu: true, dito: f.palavra }); continue; }
+        var achou = casar(fichas, i, apelidos);
+        if (achou) {
+          var dito = fichas.slice(i, i + achou.tamanho).map(function (x) { return x.palavra; }).join(' ');
+          eventos.push({ e: achou.tipo, alvos: achou.alvos, dito: dito });
+          i += achou.tamanho - 1;
+          continue;
+        }
+        var t = tipoDe(f.palavra);
+        if (t) { eventos.push({ e: 'tipo', campo: t }); continue; }
+        if (!NEUTRA[f.palavra] && f.palavra.length >= 3) naoEntendi.push(f.palavra);
+      }
+
+      // 2) monta as linhas
+      var linhas = [];
+      var pessoaEv = null, atual = null, pendentes = [], esperando = null;
+
+      function nova(catEv) {
+        atual = { pessoaEv: pessoaEv, catEv: catEv || null, testados: 0, finalizados: 0, defeitos: 0, semTipo: [], temQtd: false };
+        linhas.push(atual);
+        return atual;
+      }
+      function garantir() { return atual || nova(null); }
+      function soltarPendentes() {
+        if (pendentes.length) {
+          var l = garantir();
+          pendentes.forEach(function (v) { l.semTipo.push(v); l.temQtd = true; });
+          pendentes = [];
+        }
+        esperando = null;
+      }
+
+      eventos.forEach(function (ev) {
+        if (ev.e === 'pessoa') {
+          soltarPendentes();
+          pessoaEv = ev; atual = null;
+        } else if (ev.e === 'cat') {
+          if (atual && !atual.catEv) atual.catEv = ev;
+          else if (atual && atual.catEv && !atual.temQtd) atual.catEv = ev;
+          else {
+            var carregar = pendentes; pendentes = [];
+            if (atual) { esperando = null; }
+            nova(ev);
+            pendentes = carregar;
+          }
+        } else if (ev.e === 'num') {
+          if (esperando) { var l = garantir(); l[esperando] += ev.v; l.temQtd = true; esperando = null; }
+          else pendentes.push(ev.v);
+        } else if (ev.e === 'tipo') {
+          if (pendentes.length) {
+            var l2 = garantir();
+            var v = pendentes.pop();
+            pendentes.forEach(function (x) { l2.semTipo.push(x); });
+            pendentes = [];
+            l2[ev.campo] += v; l2.temQtd = true;
+            esperando = null;
+          } else {
+            esperando = ev.campo;
+          }
+        }
+      });
+      soltarPendentes();
+
+      // 3) resolve nomes, categorias e números sem tipo
+      var resultado = [];
+      linhas.forEach(function (l) {
+        if (!l.temQtd && !l.catEv) return;
+        var r = { pessoa: null, pessoaOpcoes: [], categoria: null, categoriaOpcoes: [],
+          testados: l.testados, finalizados: l.finalizados, defeitos: l.defeitos, semTipo: l.semTipo.slice(),
+          supostos: {}, ditoPessoa: '', ditoCategoria: '' };
+
+        var opcoesPessoa = l.pessoaEv ? l.pessoaEv.alvos : (eu ? [eu] : []);
+        r.ditoPessoa = l.pessoaEv ? l.pessoaEv.dito : '';
+        if (!l.pessoaEv) r.supostos.pessoa = true;
+        var catOpcoes = l.catEv ? l.catEv.alvos : [];
+        r.ditoCategoria = l.catEv ? l.catEv.dito : '';
+
+        var p = escolherPessoa(opcoesPessoa, catOpcoes.length === 1 ? catOpcoes[0] : null);
+        if (p) { r.pessoa = p.valor; if (p.suposto) r.supostos.pessoa = true; } else r.pessoaOpcoes = opcoesPessoa.slice();
+
+        if (catOpcoes.length) {
+          var c = escolherCategoria(catOpcoes, r.pessoa);
+          if (c) { r.categoria = c.valor; if (c.suposto) r.supostos.categoria = true; } else r.categoriaOpcoes = catOpcoes.slice();
+        } else if (r.pessoa && habitos[r.pessoa] && (habitos[r.pessoa].categorias || []).length) {
+          r.categoria = habitos[r.pessoa].categorias[0];
+          r.supostos.categoria = true;
+        }
+
+        if (!r.pessoa && opcoesPessoa.length > 1 && r.categoria) {
+          var p2 = escolherPessoa(opcoesPessoa, r.categoria);
+          if (p2) { r.pessoa = p2.valor; r.pessoaOpcoes = []; r.supostos.pessoa = true; }
+        }
+
+        // Número dito sem "testados/finalizados": usa o costume da pessoa, se for claro.
+        if (r.semTipo.length && r.pessoa && habitos[r.pessoa] && habitos[r.pessoa].tipo &&
+            r.testados + r.finalizados + r.defeitos === 0 && r.semTipo.length === 1) {
+          r[habitos[r.pessoa].tipo] += r.semTipo.pop();
+          r.supostos.tipo = habitos[r.pessoa].tipo;
+        }
+        resultado.push(r);
+      });
+
+      // Junta linhas repetidas da mesma pessoa e categoria.
+      var unidas = [];
+      resultado.forEach(function (r) {
+        var igual = r.pessoa && r.categoria && unidas.filter(function (u) {
+          return u.pessoa === r.pessoa && u.categoria === r.categoria && !u.semTipo.length && !r.semTipo.length;
+        })[0];
+        if (igual) {
+          igual.testados += r.testados; igual.finalizados += r.finalizados; igual.defeitos += r.defeitos;
+        } else unidas.push(r);
+      });
+
+      unidas.forEach(function (r) { r.problemas = problemas(r); });
+      return { linhas: unidas, naoEntendi: naoEntendi };
+    }
+
+    return { ler: ler, problemas: problemas };
+  }
+
+  function problemas(r) {
+    var lista = [];
+    if (!r.pessoa) lista.push(r.pessoaOpcoes && r.pessoaOpcoes.length ? 'Qual ' + (r.ditoPessoa || 'pessoa') + '?' : 'Falta o nome');
+    if (!r.categoria) lista.push(r.categoriaOpcoes && r.categoriaOpcoes.length ? 'Qual categoria?' : 'Falta a categoria');
+    if (r.semTipo && r.semTipo.length) lista.push('Testados, finalizados ou defeitos?');
+    if (!(r.semTipo && r.semTipo.length) && r.testados + r.finalizados + r.defeitos === 0) lista.push('Falta a quantidade');
+    return lista;
+  }
+
+  var api = { criarLeitor: criarLeitor, normalizar: normalizar, chave: chave, problemas: problemas };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  raiz.LeitorProducao = api;
+})(this);
+</script>
