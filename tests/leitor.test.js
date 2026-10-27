@@ -250,3 +250,70 @@ test('avisos: máximo da pessoa, tipo fora do costume e coisas deduzidas', () =>
   assert.deepStrictEqual(L.avisos({ pessoa: 'ANA LEAL', categoria: 'FONE', testados: 2, finalizados: 0, defeitos: 0, supostos: { pessoa: true, categoria: true } }, dados),
     ['Nome deduzido: confira', 'Categoria deduzida: confira']);
 });
+
+test('erros de escrita do ditado: "perfeito", "estados", "jogos", números escritos errado', () => {
+  const cats = ['FONE DE OUVIDO', 'TECLADO', 'VIDEO GAMES', 'NOTEBOOK', 'MOUSE', 'FONE'];
+  const l = L.criarLeitor({ pessoas: pessoas.concat(['MARIA GABRIELA']), categorias: cats, habitos: {}, ativos: [] });
+  const r = (t) => resumo(l.ler(t, 'JOÃO PEDRO'));
+  // Frase do print do João.
+  assert.deepStrictEqual(r('Maria Gabriela 2 testados fone de ouvido Um defeito 4 finalizados 2 teclados testados um teclado perfeito 3 teclados testados e finalizados Jogos um defeito e 2 estados'), [
+    ['MARIA GABRIELA', 'FONE DE OUVIDO', 2, 4, 1],
+    ['MARIA GABRIELA', 'TECLADO', 5, 3, 1],
+    ['MARIA GABRIELA', 'VIDEO GAMES', 2, 0, 1]
+  ]);
+  assert.deepStrictEqual(r('Julia 3 teclados finalisados 2 testadas 1 com efeito'), [['JULIA GOMES', 'TECLADO', 2, 3, 1]]);
+  assert.deepStrictEqual(r('Julia dose fones testados e treis defeituosos'), [['JULIA GOMES', 'FONE', 12, 0, 3]]);
+  assert.deepStrictEqual(r('Julia quarto notebooks testados'), [['JULIA GOMES', 'NOTEBOOK', 4, 0, 0]]);
+  // "quarto" sem categoria depois não é número; "estado" solto não copia quantidade.
+  assert.deepStrictEqual(r('Julia no quarto 3 notebooks testados'), [['JULIA GOMES', 'NOTEBOOK', 3, 0, 0]]);
+  assert.deepStrictEqual(r('Julia 3 mouses testados, estado de São Paulo'), [['JULIA GOMES', 'MOUSE', 3, 0, 0]]);
+  assert.deepStrictEqual(l.ler('tudo perfeito por aqui', 'JOÃO PEDRO').linhas, []);
+});
+
+test('bateria de erros de escrita com nomes e produtos da planilha', () => {
+  const ps = ['ÁLVARO COELHO', 'ANA CLARA', 'ANA LEAL', 'ARTHUR SILVÉRIO', 'ARTUR ANTUNES', 'CAUÃ ENRICO', 'EDUARDA CRISTINA',
+    'GABRIEL MARCUCCI', 'GABRIEL VIEIRA', 'HEVILLYN EMANUELE', 'IGOR GOMES', 'JANINE RODRIGUES', 'JOÃO PEDRO', 'JOÃO SUETO',
+    'JULIA GOMES', 'LAVINEA LOPES', 'MARIA GABRIELA', 'SAMUEL BRITO', 'ANNA LUIZA', 'ARTHUR PRATES', 'DANIEL VARGAS'];
+  const cs = ['NOTEBOOK', 'AIR COOLER', 'APPLE TV', 'CABO HDMI', 'CABO USB', 'CONFERÊNCIA DE KIT', 'NINTENDO SWITCH OLED', 'TRACKPAD',
+    'HEADSET', 'PLAYSTATION 5', 'MOUSE', 'TECLADO', 'FONE', 'ANTENA', 'CAIXA DE SOM', 'CAIXA DE FERRAMENTAS', 'MONITOR', 'VOLANTE'];
+  const l = L.criarLeitor({ pessoas: ps, categorias: cs, habitos: {}, ativos: [] });
+  const um = (t) => { const r = l.ler(t, 'JOÃO PEDRO').linhas; assert.strictEqual(r.length, 1, t); return [r[0].pessoa, r[0].categoria, r[0].testados, r[0].finalizados, r[0].defeitos]; };
+  const casos = [
+    ['Kauã 3 notebooks testados', ['CAUÃ ENRICO', 'NOTEBOOK', 3, 0, 0]],
+    ['Cauan 3 notebooks testados', ['CAUÃ ENRICO', 'NOTEBOOK', 3, 0, 0]],
+    ['Evelyn 2 mouses finalizados', ['HEVILLYN EMANUELE', 'MOUSE', 0, 2, 0]],
+    ['Hevelin 2 mauses finalizados', ['HEVILLYN EMANUELE', 'MOUSE', 0, 2, 0]],
+    ['Lavínia 4 teclados testados', ['LAVINEA LOPES', 'TECLADO', 4, 0, 0]],
+    ['Marcuci 2 fones testados', ['GABRIEL MARCUCCI', 'FONE', 2, 0, 0]],
+    ['Alvaro 3 antenas testadas', ['ÁLVARO COELHO', 'ANTENA', 3, 0, 0]],
+    ['Ana Luisa 2 monitores testados', ['ANNA LUIZA', 'MONITOR', 2, 0, 0]],
+    ['Suéto 2 fones testados', ['JOÃO SUETO', 'FONE', 2, 0, 0]],
+    ['Igor 2 cabos u esse bê testados', ['IGOR GOMES', 'CABO USB', 2, 0, 0]],
+    ['Igor 2 cabos agá dê eme i finalizados', ['IGOR GOMES', 'CABO HDMI', 0, 2, 0]],
+    ['Daniel 1 Nintendo Suite finalizado', ['DANIEL VARGAS', 'NINTENDO SWITCH OLED', 0, 1, 0]],
+    ['Daniel 2 notebuques testados', ['DANIEL VARGAS', 'NOTEBOOK', 2, 0, 0]],
+    ['Daniel 2 rédisete testados', ['DANIEL VARGAS', 'HEADSET', 2, 0, 0]],
+    ['Daniel 1 pleisteichon 5 testado', ['DANIEL VARGAS', 'PLAYSTATION 5', 1, 0, 0]],
+    ['Daniel 3 épou tivi testados', ['DANIEL VARGAS', 'APPLE TV', 3, 0, 0]],
+    ['Daniel 2 trequipad finalizados', ['DANIEL VARGAS', 'TRACKPAD', 0, 2, 0]],
+    ['Daniel 2 er cooler testados', ['DANIEL VARGAS', 'AIR COOLER', 2, 0, 0]],
+    ['Daniel 4 conferência de quite testados', ['DANIEL VARGAS', 'CONFERÊNCIA DE KIT', 4, 0, 0]],
+    ['Julia. 3 notebooks. Testados.', ['JULIA GOMES', 'NOTEBOOK', 3, 0, 0]],
+    ['Pronto, Julia 3 teclados testados', ['JULIA GOMES', 'TECLADO', 3, 0, 0]],
+    ['Julia 3 teclados testados, pronto.', ['JULIA GOMES', 'TECLADO', 3, 0, 0]],
+    ['No final do dia Julia 3 teclados testados', ['JULIA GOMES', 'TECLADO', 3, 0, 0]],
+    ['Samuel cincu fones testados', ['SAMUEL BRITO', 'FONE', 5, 0, 0]],
+    ['Samuel seti fones finalizados', ['SAMUEL BRITO', 'FONE', 0, 7, 0]],
+    ['Hum Samuel 2 fones testados', ['SAMUEL BRITO', 'FONE', 2, 0, 0]],
+    ['Samuel 2 caixas de ferramenta testadas', ['SAMUEL BRITO', 'CAIXA DE FERRAMENTAS', 2, 0, 0]]
+  ];
+  casos.forEach(([frase, esperado]) => assert.deepStrictEqual(um(frase), esperado, frase));
+});
+
+test('lista grande continua rápida', () => {
+  const cs = []; for (let i = 0; i < 140; i++) cs.push('PRODUTO EXEMPLO ' + String.fromCharCode(65 + (i % 26)) + String.fromCharCode(65 + Math.floor(i / 26)) + ' LED USB');
+  const l = L.criarLeitor({ pessoas, categorias: cs.concat(['NOTEBOOK', 'TECLADO']), habitos: {}, ativos: [] });
+  const t = Date.now();
+  l.ler('Julia 3 notebooks testados 2 teclados finalizados um teclado perfeito '.repeat(4), 'JOÃO PEDRO');
+  assert.ok(Date.now() - t < 500, 'demorou ' + (Date.now() - t) + ' ms');
+});
