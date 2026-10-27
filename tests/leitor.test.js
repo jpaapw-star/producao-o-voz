@@ -195,3 +195,18 @@ test('apelidos da aba Apelidos valem para pessoas e categorias', () => {
   assert.deepStrictEqual(resumo(l.ler('Gabi 3 ps5 testados', 'JOÃO PEDRO')), [['GABRIEL VIEIRA', 'PLAYSTATION 5', 3, 0, 0]]);
   assert.deepStrictEqual(resumo(l.ler('Gabi 3 PS 5 testados', 'JOÃO PEDRO')), [['GABRIEL VIEIRA', 'PLAYSTATION 5', 3, 0, 0]]);
 });
+
+test('"mouses" é MOUSE e "web cans" separado é WEBCAM (frase do João)', () => {
+  const l = L.criarLeitor({ pessoas, categorias: ['NOTEBOOK', 'MOUSE', 'WEBCAM', 'VALIDAÇÃO NOTEBOOK', 'VALIDAÇÃO VIDEO GAME', 'VIDEO GAMES'], habitos: {}, ativos: [] });
+  const r = l.ler('Júlia Gomes 4 notebooks testados 5 notebooks defeitos 3 mouses finalizados 4 mouses testados e finalizados 8 webcans testadas 13 web cans defeitos Validação notebook 5 testadas validação videogame 3 defeitos e 5 testadas Aquilo ali faz o seguinte', 'JOÃO PEDRO');
+  assert.deepStrictEqual(resumo(r), [
+    ['JULIA GOMES', 'NOTEBOOK', 4, 0, 5],
+    ['JULIA GOMES', 'MOUSE', 4, 7, 0],
+    ['JULIA GOMES', 'WEBCAM', 8, 0, 13],
+    ['JULIA GOMES', 'VALIDAÇÃO NOTEBOOK', 5, 0, 0],
+    ['JULIA GOMES', 'VALIDAÇÃO VIDEO GAME', 5, 0, 3]
+  ]);
+  assert.ok(r.linhas.every((x) => x.problemas.length === 0));
+  // "meses" continua sendo "mes", e não quebra palavras que já casavam.
+  assert.deepStrictEqual(resumo(leitor().ler('Ana Leal 2 roteadores testados', '')), [['ANA LEAL', 'ROTEADOR', 2, 0, 0]]);
+});

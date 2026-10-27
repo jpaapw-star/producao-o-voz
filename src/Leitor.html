@@ -61,6 +61,8 @@
   }
 
   function chave(p) { return som(singular(p)); }
+  // Segunda leitura do plural: "mouses" → "mouse" (a primeira dá "mous", como "meses" → "mes").
+  function altChave(p) { return /[rsz]es$/.test(p) && p.length > 4 ? som(p.slice(0, -1)) : undefined; }
 
   function chaves(texto) {
     return normalizar(texto).split(' ').filter(function (p) { return p && !LIGACOES[p]; }).map(chave);
@@ -175,19 +177,35 @@
 
   // Procura o nome/categoria mais comprido que começa na posição i.
   function casar(fichas, i, apelidos) {
-    var melhores = [], melhorNota = -1;
+    var melhores = [], melhorNota = -1, melhorTamanho = 0;
+    // "mouses" pode ser MOUSE (só tira o s) e não "mous"; o ditado também separa "web cans" = WEBCAM.
+    function custo(f, alvo) {
+      if (!f || f.chave === undefined) return -1;
+      var c = compara(f.chave, alvo);
+      if (f.alt !== undefined) {
+        var c2 = compara(f.alt, alvo);
+        if (c2 >= 0 && (c < 0 || c2 < c)) c = c2;
+      }
+      return c;
+    }
     apelidos.forEach(function (a) {
-      var erros = 0;
+      var erros = 0, pos = i;
       for (var n = 0; n < a.seq.length; n++) {
-        var f = fichas[i + n];
-        if (!f || f.chave === undefined) return;
-        var c = compara(f.chave, a.seq[n]);
+        var f = fichas[pos], g = fichas[pos + 1];
+        var c = custo(f, a.seq[n]);
+        if (c !== 0 && f && g && f.palavra && g.palavra) {
+          var junto = f.palavra + g.palavra;
+          var cj = custo({ chave: chave(junto), alt: altChave(junto) }, a.seq[n]);
+          if (cj === 0) { pos += 2; continue; }
+        }
         if (c < 0) return;
         erros += c;
+        pos++;
       }
       if (a.fraco && erros) return;
       var nota = a.seq.length * 10 + (a.completo ? 5 : 0) - erros * 3 - (a.fraco ? 4 : 0);
-      if (nota > melhorNota) { melhorNota = nota; melhores = [a]; } else if (nota === melhorNota) melhores.push(a);
+      if (nota > melhorNota) { melhorNota = nota; melhores = [a]; melhorTamanho = pos - i; }
+      else if (nota === melhorNota) melhores.push(a);
     });
     if (!melhores.length) return null;
     var alvos = [];
@@ -200,7 +218,7 @@
       tipo = 'cat';
       alvos = soCat.map(function (a) { return a.alvo; }).filter(function (v, k, l) { return l.indexOf(v) === k; });
     }
-    return { tipo: tipo, alvos: alvos, tamanho: melhores[0].seq.length };
+    return { tipo: tipo, alvos: alvos, tamanho: melhorTamanho };
   }
 
   function criarLeitor(dados) {
@@ -250,7 +268,7 @@
       var fichas = brutos.filter(function (b) { return typeof b === 'object' || !LIGACOES[b]; }).map(function (b) {
         // O número também tem "chave", para casar com categorias como "PLAYSTATION 5".
         if (typeof b === 'object') return { num: b.num, orig: b.orig, chave: String(b.num) };
-        return { palavra: b, chave: chave(b) };
+        return { palavra: b, chave: chave(b), alt: altChave(b) };
       });
       var eventos = [], naoEntendi = [], conhecidos = 0, cancelou = false;
       for (var i = 0; i < fichas.length; i++) {
