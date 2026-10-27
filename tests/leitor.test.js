@@ -157,3 +157,41 @@ test('validação é categoria: "notebooks validados" e "validação notebook" c
   // Notebook comum continua notebook.
   assert.deepStrictEqual(resumo(l.ler('Ana Leal 2 notebooks finalizados', '')), [['ANA LEAL', 'NOTEBOOK', 0, 2, 0]]);
 });
+
+test('"videogame" junto casa com "VÍDEO GAME" e validações de várias categorias', () => {
+  const cats = ['NOTEBOOK', 'FONE', 'VÍDEO GAME', 'VALIDAÇÃO NOTEBOOK', 'VALIDAÇÃO ROTEADOR', 'VALIDAÇÃO VÍDEO GAME', 'ROTEADOR'];
+  const l = leitor({ categorias: cats });
+  assert.deepStrictEqual(resumo(l.ler('Gabriel Vieira validação notebooks 2 testados um defeito Validação videogame Um testado 3 defeitos Notebooks 3 testados 2 finalizados', '')), [
+    ['GABRIEL VIEIRA', 'VALIDAÇÃO NOTEBOOK', 2, 0, 1],
+    ['GABRIEL VIEIRA', 'VALIDAÇÃO VÍDEO GAME', 1, 0, 3],
+    ['GABRIEL VIEIRA', 'NOTEBOOK', 3, 2, 0]
+  ]);
+  const r = l.ler('2 notebooks testados um notebook defeito 3 validações videogames testadas uma validação videogame defeito 3 fones finalizados', 'JOÃO PEDRO');
+  assert.deepStrictEqual(resumo(r), [
+    ['JOÃO PEDRO', 'NOTEBOOK', 2, 0, 1],
+    ['JOÃO PEDRO', 'VALIDAÇÃO VÍDEO GAME', 3, 0, 1],
+    ['JOÃO PEDRO', 'FONE', 0, 3, 0]
+  ]);
+  assert.deepStrictEqual(resumo(l.ler('Julia 4 video games testados', '')), [['JULIA GOMES', 'VÍDEO GAME', 4, 0, 0]]);
+  assert.deepStrictEqual(resumo(l.ler('Julia 2 videogames validados', '')), [['JULIA GOMES', 'VALIDAÇÃO VÍDEO GAME', 2, 0, 0]]);
+});
+
+test('categoria com número no nome (PlayStation 5)', () => {
+  const r = L.criarLeitor({ pessoas, categorias: categorias.concat(['PLAYSTATION 5', 'PLAYSTATION 4']), habitos: {}, ativos: [] })
+    .ler('Julia playstation 5 três testados', 'JOÃO PEDRO');
+  assert.deepStrictEqual(resumo(r), [['JULIA GOMES', 'PLAYSTATION 5', 3, 0, 0]]);
+});
+
+test('validação com finalizados é problema e quantidade alta vira aviso', () => {
+  assert.deepStrictEqual(L.problemas({ pessoa: 'ANA LEAL', categoria: 'VALIDAÇÃO NOTEBOOK', testados: 0, finalizados: 2, defeitos: 0 }),
+    ['Validação é só testados ou defeitos']);
+  assert.deepStrictEqual(L.avisos({ testados: 150, finalizados: 3, defeitos: 0 }), ['Confira: 150 testados é muito']);
+  assert.deepStrictEqual(L.avisos({ testados: 100, finalizados: 3, defeitos: 0 }), []);
+});
+
+test('apelidos da aba Apelidos valem para pessoas e categorias', () => {
+  const l = L.criarLeitor({ pessoas, categorias: categorias.concat(['PLAYSTATION 5']), habitos: {}, ativos: [],
+    apelidos: [['Gabi', 'GABRIEL VIEIRA'], ['PS5', 'PLAYSTATION 5'], ['cam', 'NOTEBOOK'], ['Zé', 'FULANO FORA DA LISTA']] });
+  assert.deepStrictEqual(resumo(l.ler('Gabi 3 ps5 testados', 'JOÃO PEDRO')), [['GABRIEL VIEIRA', 'PLAYSTATION 5', 3, 0, 0]]);
+  assert.deepStrictEqual(resumo(l.ler('Gabi 3 PS 5 testados', 'JOÃO PEDRO')), [['GABRIEL VIEIRA', 'PLAYSTATION 5', 3, 0, 0]]);
+});

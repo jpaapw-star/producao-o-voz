@@ -12,7 +12,7 @@ const dados = {
   habitos: { 'DANIEL VARGAS': { categorias: ['CAIXA DE SOM'], tipo: 'finalizados' } }
 };
 const falso = `<script>
-  localStorage.setItem('producao.codigo','x'); localStorage.setItem('producao.quem','JOÃO PEDRO');
+  localStorage.setItem('producao.quem','JOÃO PEDRO');
   window.google = { script: { run: (function mk(ok){ return new Proxy({}, { get: (_, k) =>
     k === 'withSuccessHandler' ? (f) => mk(f) : k === 'withFailureHandler' ? () => mk(ok) :
     () => setTimeout(() => ok(${JSON.stringify(dados)}), 10) }); })() } };

@@ -27,7 +27,7 @@ function criarAba(nome, linhas) {
       const ler = (f) => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => f(r + i, c + j)));
       return {
         getValues: () => ler(celula),
-        getDisplayValues: () => ler((a, b) => String(celula(a, b))),
+        getDisplayValues: () => ler((a, b) => { const v = celula(a, b); return v instanceof Date ? formatar(v, 'America/Sao_Paulo', 'dd/MM/yyyy') : String(v); }),
         getFormulas: () => ler((a, b) => formulas[a + ',' + b] || ''),
         getFormulasR1C1: () => ler((a, b) => formulas[a + ',' + b] || ''),
         setValues: (v) => {
@@ -71,7 +71,7 @@ function carregarServidor(planilha, opcoes = {}) {
   const cache = {};
   let uuid = 0;
   const ctx = {
-    SEGREDOS: { planilhaId: 'PLANILHA', codigoEquipe: 'abc123' },
+    SEGREDOS: { planilhaId: 'PLANILHA' },
     SpreadsheetApp: {
       openById: () => planilha,
       flush: () => {},

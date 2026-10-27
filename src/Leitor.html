@@ -87,7 +87,7 @@
     return -1;
   }
 
-  function montarDicionario(pessoas, categorias) {
+  function montarDicionario(pessoas, categorias, extras) {
     var apelidos = [];
     var primeiros = {};
     pessoas.forEach(function (nome) {
@@ -111,6 +111,19 @@
       if (!k.length) return;
       apelidos.push({ tipo: 'cat', alvo: cat, seq: k, completo: true });
       if (k.length > 1) apelidos.push({ tipo: 'cat', alvo: cat, seq: [k[0]], completo: false });
+      // O ditado junta ou separa palavras: "videogame" = "VÍDEO GAME", "video game" = "VIDEOGAME".
+      for (var i = 0; i + 1 < k.length; i++) {
+        apelidos.push({ tipo: 'cat', alvo: cat, seq: k.slice(0, i).concat([chave(k[i] + k[i + 1])], k.slice(i + 2)), completo: true });
+      }
+    });
+    // Aba "Apelidos" da planilha: "Gabi" → GABRIEL VIEIRA, "PS5" → PLAYSTATION 5.
+    (extras || []).forEach(function (a) {
+      var k = chaves(a[0]);
+      if (!k.length) return;
+      var tipo = pessoas.indexOf(a[1]) >= 0 ? 'pessoa' : categorias.indexOf(a[1]) >= 0 ? 'cat' : null;
+      if (!tipo) return;
+      apelidos.push({ tipo: tipo, alvo: a[1], seq: k, completo: true });
+      if (k.length > 1) apelidos.push({ tipo: tipo, alvo: a[1], seq: [chave(k.join(''))], completo: true });
     });
     return apelidos;
   }
@@ -194,7 +207,7 @@
     dados = dados || {};
     var pessoas = dados.pessoas || [];
     var categorias = dados.categorias || [];
-    var apelidos = montarDicionario(pessoas, categorias);
+    var apelidos = montarDicionario(pessoas, categorias, dados.apelidos);
     var habitos = dados.habitos || {};   // { PESSOA: { categorias: [recentes...], tipo: 'finalizados'|null } }
     var ativos = dados.ativos || [];     // pessoas com lançamento nos últimos dias, mais recentes primeiro
     // "notebooks validados" = categoria VALIDAÇÃO NOTEBOOK
@@ -235,7 +248,8 @@
         .split(' ').filter(Boolean);
       var brutos = lerNumeros(palavras);
       var fichas = brutos.filter(function (b) { return typeof b === 'object' || !LIGACOES[b]; }).map(function (b) {
-        if (typeof b === 'object') return { num: b.num, orig: b.orig };
+        // O número também tem "chave", para casar com categorias como "PLAYSTATION 5".
+        if (typeof b === 'object') return { num: b.num, orig: b.orig, chave: String(b.num) };
         return { palavra: b, chave: chave(b) };
       });
       var eventos = [], naoEntendi = [], conhecidos = 0, cancelou = false;
@@ -246,7 +260,7 @@
         if (f.palavra === 'eu' || f.palavra === 'mim') { eventos.push({ e: 'pessoa', alvos: eu ? [eu] : [], eu: true, dito: f.palavra }); continue; }
         var achou = casar(fichas, i, apelidos);
         if (achou) {
-          var dito = fichas.slice(i, i + achou.tamanho).map(function (x) { return x.palavra; }).join(' ');
+          var dito = fichas.slice(i, i + achou.tamanho).map(function (x) { return x.palavra || x.orig; }).join(' ');
           eventos.push({ e: achou.tipo, alvos: achou.alvos, dito: dito });
           conhecidos++;
           i += achou.tamanho - 1;
@@ -438,11 +452,11 @@
         } else unidas.push(r);
       });
 
-      unidas.forEach(function (r) { r.problemas = problemas(r); });
+      unidas.forEach(function (r) { r.problemas = problemas(r); r.avisos = avisos(r); });
       return { linhas: unidas, naoEntendi: naoEntendi, ignorados: ignorados };
     }
 
-    return { ler: ler, problemas: problemas };
+    return { ler: ler, problemas: problemas, avisos: avisos };
   }
 
   function problemas(r) {
@@ -455,10 +469,20 @@
     }
     if (r.semTipo && r.semTipo.length) lista.push('Testados, finalizados ou defeitos?');
     if (!(r.semTipo && r.semTipo.length) && r.testados + r.finalizados + r.defeitos === 0) lista.push('Falta a quantidade');
+    if (r.categoria && /^valida/.test(normalizar(r.categoria)) && r.finalizados) lista.push('Validação é só testados ou defeitos');
     return lista;
   }
 
-  var api = { criarLeitor: criarLeitor, normalizar: normalizar, chave: chave, problemas: problemas };
+  // Avisos não impedem gravar: só pedem para conferir.
+  function avisos(r) {
+    var lista = [];
+    ['testados', 'finalizados', 'defeitos'].forEach(function (k) {
+      if (r[k] > 100) lista.push('Confira: ' + r[k] + ' ' + k + ' é muito');
+    });
+    return lista;
+  }
+
+  var api = { criarLeitor: criarLeitor, normalizar: normalizar, chave: chave, problemas: problemas, avisos: avisos };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   raiz.LeitorProducao = api;
 })(this);

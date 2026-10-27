@@ -5,13 +5,14 @@
  *
  * Configuração (fica fora do repositório):
  *   PLANILHA_ID   — ID da planilha de produção
- *   CODIGO_EQUIPE — código que a equipe digita uma vez no celular
+ * Quem tem o link do app pode lançar; a aba LOG_ABA guarda quem lançou cada vez.
  * Vêm do arquivo 00_Segredos.gs, gerado pelo GitHub Actions a partir dos segredos do repositório,
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.1.0';
+var VERSAO = '1.3.0';
 var LOG_ABA = 'Lançamentos por voz';
+var APELIDOS_ABA = 'Apelidos';
 var LOG_CABECALHO = ['ID', 'QUANDO', 'QUEM LANÇOU', 'O QUE FOI FALADO', 'LINHAS', 'DESFEITO EM'];
 var DESFAZER_MINUTOS = 30;
 var LINHAS_HISTORICO = 3000;
@@ -31,29 +32,9 @@ function incluir_(nome) {
 
 function config_() {
   var segredos = (typeof SEGREDOS !== 'undefined' && SEGREDOS) ? SEGREDOS : {};
-  var props = PropertiesService.getScriptProperties();
-  return {
-    planilhaId: segredos.planilhaId || props.getProperty('PLANILHA_ID') || '',
-    codigo: String(segredos.codigoEquipe || props.getProperty('CODIGO_EQUIPE') || '')
-  };
-}
-
-// Bloqueia tentativas seguidas de código errado (10 erros em 10 minutos travam por 10 minutos).
-function conferirCodigo_(codigo) {
-  var cfg = config_();
-  if (!cfg.planilhaId || !cfg.codigo) throw new Error('O app ainda não foi configurado (planilha ou código da equipe).');
-  var cache = CacheService.getScriptCache();
-  var erros = Number(cache.get('erros') || 0);
-  if (erros >= 10) throw new Error('Muitas tentativas. Espere 10 minutos.');
-  if (normalizarCodigo_(codigo) !== normalizarCodigo_(cfg.codigo)) {
-    cache.put('erros', String(erros + 1), 600);
-    throw new Error('CODIGO_ERRADO');
-  }
-  return cfg;
-}
-
-function normalizarCodigo_(c) {
-  return String(c || '').trim().toLowerCase();
+  var planilhaId = segredos.planilhaId || PropertiesService.getScriptProperties().getProperty('PLANILHA_ID') || '';
+  if (!planilhaId) throw new Error('O app ainda não foi configurado (falta a planilha).');
+  return { planilhaId: planilhaId };
 }
 
 function semAcento_(s) {
@@ -137,6 +118,24 @@ function listas_(ss) {
   return { pessoas: listaDaColuna_(cfgAba, colPessoas), categorias: listaDaColuna_(cfgAba, colCategorias) };
 }
 
+// Aba "Apelidos": APELIDO | NOME OU CATEGORIA. Criada vazia na primeira vez; você mesmo preenche.
+function apelidos_(ss, l) {
+  var aba = abaPorNome_(ss, APELIDOS_ABA);
+  if (!aba) {
+    aba = ss.insertSheet(APELIDOS_ABA, ss.getSheets().length);
+    aba.appendRow(['APELIDO', 'NOME OU CATEGORIA']);
+    aba.setFrozenRows(1);
+    return [];
+  }
+  var oficial = {};
+  l.pessoas.concat(l.categorias).forEach(function (x) { oficial[semAcento_(x)] = x; });
+  var n = aba.getLastRow();
+  if (n < 2) return [];
+  return aba.getRange(2, 1, n - 1, 2).getValues()
+    .map(function (r) { return [String(r[0]).trim(), oficial[semAcento_(r[1])]]; })
+    .filter(function (r) { return r[0] && r[1]; });
+}
+
 function ehData_(v) {
   return Object.prototype.toString.call(v) === '[object Date]';
 }
@@ -182,8 +181,8 @@ function habitos_(aba, col, ultima, tz, pessoas) {
 
 /* ------------------------------------------------------------------ API do app */
 
-function apiInicio(codigo) {
-  var cfg = conferirCodigo_(codigo);
+function apiInicio() {
+  var cfg = config_();
   var ss = abrir_(cfg);
   var tz = ss.getSpreadsheetTimeZone();
   var aba = abaPorNome_(ss, 'Registros');
@@ -196,6 +195,7 @@ function apiInicio(codigo) {
     versao: VERSAO,
     pessoas: l.pessoas,
     categorias: l.categorias,
+    apelidos: apelidos_(ss, l),
     habitos: h.habitos,
     ativos: h.ativos,
     hora: Number(Utilities.formatDate(new Date(), tz, 'H'))
@@ -209,8 +209,8 @@ function faixa_(hora) {
   return { inicio: dois(h), fim: dois(h + 1) };
 }
 
-function apiGravar(codigo, pedido) {
-  var cfg = conferirCodigo_(codigo);
+function apiGravar(pedido) {
+  var cfg = config_();
   pedido = pedido || {};
   var quem = String(pedido.quem || '').trim();
   if (!quem) throw new Error('Escolha quem está lançando.');
@@ -250,6 +250,15 @@ function apiGravar(codigo, pedido) {
     var horaTxt = Utilities.formatDate(agora, tz, 'HH:mm');
     var mesNum = Number(Utilities.formatDate(agora, tz, 'M'));
     var anoTxt = Utilities.formatDate(agora, tz, 'yyyy');
+
+    var faltam = ['testados', 'finalizados', 'defeitos', 'inicio', 'fim'].filter(function (k) { return col[k] === undefined; });
+    if (faltam.length) throw new Error('Não achei em Registros a coluna de: ' + faltam.join(', ') + '. Confira o cabeçalho.');
+
+    // Mesma pessoa e categoria já lançadas hoje nesta faixa: confirma antes (evita lançar duas vezes).
+    if (!pedido.confirmarRepetidos) {
+      var repetidas = repetidasNaFaixa_(aba, col, ultima, tz, dataTxt, f.inicio, linhas);
+      if (repetidas.length) return { ok: false, repetidas: repetidas, faixa: f.inicio + ' – ' + f.fim };
+    }
 
     var temModelo = ultima > col.linhaCabecalho;
     var modelo = temModelo ? aba.getRange(ultima, 1, 1, col.largura).getValues()[0] : [];
@@ -316,6 +325,22 @@ function colunasComArrayFormula_(aba, col) {
   return cols;
 }
 
+function repetidasNaFaixa_(aba, col, ultima, tz, dataTxt, inicio, linhas) {
+  if (ultima <= col.linhaCabecalho) return [];
+  var de = Math.max(col.linhaCabecalho + 1, ultima - 400);
+  var vals = aba.getRange(de, 1, ultima - de + 1, col.largura).getDisplayValues();
+  var hoje = dataTexto_(dataTxt, tz);
+  var vistas = {};
+  vals.forEach(function (l) {
+    if (dataTexto_(l[col.data], tz) !== hoje) return;
+    var m = String(l[col.inicio]).match(/(\d{1,2}):(\d{2})/);
+    if (!m || ('0' + m[1]).slice(-2) + ':' + m[2] !== inicio) return;
+    vistas[semAcento_(l[col.pessoa]) + '|' + semAcento_(l[col.categoria])] = true;
+  });
+  return linhas.filter(function (x) { return vistas[semAcento_(x.pessoa) + '|' + semAcento_(x.categoria)]; })
+    .map(function (x) { return x.pessoa + ' · ' + x.categoria; });
+}
+
 function abaLog_(ss) {
   var log = ss.getSheetByName(LOG_ABA);
   if (!log) {
@@ -333,8 +358,8 @@ function assinatura_(linha, col) {
     .map(function (k) { return col[k] === undefined ? '' : String(linha[col[k]]).trim(); }).join('|');
 }
 
-function apiDesfazer(codigo, id) {
-  var cfg = conferirCodigo_(codigo);
+function apiDesfazer(id) {
+  var cfg = config_();
   var ss = abrir_(cfg);
   var tz = ss.getSpreadsheetTimeZone();
   var log = ss.getSheetByName(LOG_ABA);
