@@ -642,7 +642,7 @@
         var opcoesPessoa = l.pessoaEv ? l.pessoaEv.alvos : (euPadrao ? [euPadrao] : []);
         r.ditoPessoa = l.pessoaEv ? l.pessoaEv.dito : '';
         if (!l.pessoaEv && euPadrao) r.supostos.pessoa = true;
-        if (!l.pessoaEv && !euPadrao && eu) r.semNome = true;
+        if (!l.pessoaEv && !euPadrao) r.semNome = true;
         if (l.pessoaEv && l.pessoaEv.desconhecida) r.pessoaDesconhecida = true;
         var catOpcoes = l.catEv ? l.catEv.alvos : [];
         r.ditoCategoria = l.catEv ? l.catEv.dito : '';

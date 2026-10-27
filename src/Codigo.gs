@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.5.1';
+var VERSAO = '1.6.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var LOG_CABECALHO = ['ID', 'QUANDO', 'QUEM LANÇOU', 'O QUE FOI FALADO', 'LINHAS', 'DESFEITO EM'];
@@ -251,7 +251,7 @@ function apiGravar(pedido) {
   var cfg = config_();
   pedido = pedido || {};
   var quem = String(pedido.quem || '').trim();
-  if (!quem) throw new Error('Escolha quem está lançando.');
+  if (!quem) quem = 'Sem aparelho';
   var f = faixa_(pedido.hora);
 
   var ss = abrir_(cfg);
@@ -428,7 +428,7 @@ function assinatura_(linha, col) {
     .map(function (k) { return col[k] === undefined ? '' : String(linha[col[k]]).trim(); }).join('|');
 }
 
-// Lançamentos de hoje feitos por quem está no aparelho, do mais novo para o mais velho.
+// Lançamentos de hoje feitos neste aparelho, do mais novo para o mais velho.
 function apiHoje(quem) {
   var cfg = config_();
   var ss = abrir_(cfg);
