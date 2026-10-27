@@ -175,6 +175,33 @@
     return null;
   }
 
+  // "meia dúzia" = 6, "2 dúzias" = 24; horário ("às 9", "na hora das nove", "das 9 às 10") não é quantidade.
+  var HORA_ANTES = { hora: 1, horas: 1 }, LIGA_HORA = { as: 1, das: 1, ate: 1, de: 1 };
+  function ajustarNumeros(b) {
+    var saida = [];
+    for (var i = 0; i < b.length; i++) {
+      var x = b[i];
+      if (x === 'duzia' || x === 'duzias') {
+        var ant = saida[saida.length - 1];
+        if (ant === 'meia') saida[saida.length - 1] = { num: 6, orig: 'meia duzia' };
+        else if (ant && typeof ant === 'object') saida[saida.length - 1] = { num: ant.num * 12, orig: ant.orig + ' duzia' };
+        else saida.push({ num: 12, orig: 'duzia' });
+        continue;
+      }
+      if (typeof x === 'object') {
+        var a1 = saida[saida.length - 1], a2 = saida[saida.length - 2], d1 = b[i + 1], d2 = b[i + 2];
+        var ehHora = (typeof a1 === 'string' && HORA_ANTES[a1]) ||
+          (typeof a1 === 'string' && LIGA_HORA[a1] && typeof a2 === 'string' && (HORA_ANTES[a2] || a2 === 'partir' || a2 === 'desde')) ||
+          (d1 === 'hora' || d1 === 'horas' || d1 === 'h') ||
+          (typeof a1 === 'string' && (a1 === 'das' || a1 === 'de') && (d1 === 'as' || d1 === 'ate') && d2 && typeof d2 === 'object') ||
+          (typeof a1 === 'string' && (a1 === 'as' || a1 === 'ate') && typeof a2 === 'object' && a2.hora);
+        if (ehHora) { saida.push({ hora: true }); continue; }
+      }
+      saida.push(x);
+    }
+    return saida.filter(function (x) { return !(x && x.hora); });
+  }
+
   // Procura o nome/categoria mais comprido que começa na posição i.
   function casar(fichas, i, apelidos) {
     var melhores = [], melhorNota = -1, melhorTamanho = 0;
@@ -228,6 +255,7 @@
     var apelidos = montarDicionario(pessoas, categorias, dados.apelidos);
     var habitos = dados.habitos || {};   // { PESSOA: { categorias: [recentes...], tipo: 'finalizados'|null } }
     var ativos = dados.ativos || [];     // pessoas com lançamento nos últimos dias, mais recentes primeiro
+    var supervisores = dados.supervisores || [];
     // "notebooks validados" = categoria VALIDAÇÃO NOTEBOOK
     var validacaoDe = {};
     categorias.forEach(function (c) {
@@ -259,22 +287,53 @@
 
     // Separa o texto em frases e descarta as que parecem conversa paralela.
     var CANCELAR = /^(esquece|esqueca|ignora|ignore|cancela|cancelar|desconsidera|apaga|apagar)$/;
+    var CORRIGIR = /^(corrigindo|corrige|alias|digo)$/;
+    var OUTRO_DIA = /^(ontem|anteontem|amanha)$/;
+
+    // Tira o número anterior a cada "não"/"quer dizer" que tem outro número depois.
+    function aplicarCorrecoes(eventos) {
+      var saida = [];
+      eventos.forEach(function (e, k) {
+        if (e.e !== 'corrige') { saida.push(e); return; }
+        var temDepois = eventos.slice(k + 1).some(function (x) { return x.e === 'num' && x.v > 0; });
+        if (!temDepois) return;
+        for (var j = saida.length - 1; j >= 0; j--) {
+          if (saida[j].e === 'pessoa') break;
+          if (saida[j].e === 'num') { saida.splice(j, 1); break; }
+        }
+      });
+      return saida;
+    }
 
     function eventosDaFrase(frase, eu) {
       var palavras = normalizar(frase)
         .replace(/\b(de|com) (feito|feitos|feita|feitas)\b/g, 'defeito')
         .split(' ').filter(Boolean);
-      var brutos = lerNumeros(palavras);
+      var brutos = ajustarNumeros(lerNumeros(palavras));
       var fichas = brutos.filter(function (b) { return typeof b === 'object' || !LIGACOES[b]; }).map(function (b) {
         // O número também tem "chave", para casar com categorias como "PLAYSTATION 5".
         if (typeof b === 'object') return { num: b.num, orig: b.orig, chave: String(b.num) };
         return { palavra: b, chave: chave(b), alt: altChave(b) };
       });
-      var eventos = [], naoEntendi = [], conhecidos = 0, cancelou = false;
+      var eventos = [], naoEntendi = [], conhecidos = 0, cancelou = false, candidatoNome = null;
       for (var i = 0; i < fichas.length; i++) {
         var f = fichas[i];
         if (f.num !== undefined) { eventos.push({ e: 'num', v: f.num, fraco: /^(um|uma)$/.test(f.orig) }); continue; }
         if (CANCELAR.test(f.palavra)) { cancelou = true; continue; }
+        // "3 notebooks, não, 4": o número seguinte troca o anterior.
+        // "não" só corrige quando vem número logo depois; "não teve defeito" apaga o tipo negado.
+        if (f.palavra === 'nao') {
+          var prox = fichas[i + 1];
+          if (prox && prox.num > 0) { eventos.push({ e: 'corrige' }); conhecidos++; continue; }
+          for (var j = i + 1; j < Math.min(fichas.length, i + 4) && fichas[j].palavra; j++) {
+            if (tipoDe(fichas[j].palavra)) { i = j; break; }
+          }
+          continue;
+        }
+        if (CORRIGIR.test(f.palavra) || (f.palavra === 'quer' && fichas[i + 1] && fichas[i + 1].palavra === 'dizer')) {
+          if (f.palavra === 'quer') i++;
+          eventos.push({ e: 'corrige' }); conhecidos++; continue;
+        }
         if (f.palavra === 'eu' || f.palavra === 'mim') { eventos.push({ e: 'pessoa', alvos: eu ? [eu] : [], eu: true, dito: f.palavra }); continue; }
         var achou = casar(fichas, i, apelidos);
         if (achou) {
@@ -287,12 +346,22 @@
         if (/^valid/.test(f.palavra)) { eventos.push({ e: 'validar' }); conhecidos++; continue; }
         var t = tipoDe(f.palavra);
         if (t) { eventos.push({ e: 'tipo', campo: t }); conhecidos++; continue; }
-        if (NEUTRA[f.palavra] || f.palavra.length < 3) continue;
+        if (NEUTRA[f.palavra] || OUTRO_DIA.test(f.palavra) || f.palavra.length < 3) continue;
         // Palavra desconhecida logo depois de um número ("3 webcams"): é um produto fora da lista.
         var anterior = eventos[eventos.length - 1];
         if (anterior && anterior.e === 'num' && f.palavra.length >= 4) {
           eventos.push({ e: 'cat', alvos: [], dito: f.palavra, desconhecida: true });
-        } else naoEntendi.push(f.palavra);
+        } else {
+          // Palavra estranha no começo, onde vem o nome ("causa" no lugar de "Cauã"): pode ser um nome trocado pelo teclado.
+          if (!eventos.length && !candidatoNome && f.palavra.length >= 4) candidatoNome = f.palavra;
+          naoEntendi.push(f.palavra);
+        }
+      }
+      eventos = aplicarCorrecoes(eventos);
+      if (candidatoNome && !eventos.some(function (e) { return e.e === 'pessoa'; }) &&
+          eventos.some(function (e) { return e.e === 'num'; })) {
+        eventos.unshift({ e: 'pessoa', alvos: [], dito: candidatoNome, desconhecida: true });
+        naoEntendi.splice(naoEntendi.indexOf(candidatoNome), 1);
       }
       // "um pouco", "uma hora" não contam como quantidade; "um notebook" conta.
       var temNumero = eventos.some(function (e, k) {
@@ -301,11 +370,12 @@
       });
       var estranhas = naoEntendi.length + eventos.filter(function (e) { return e.desconhecida; }).length;
       var conversa = cancelou || !temNumero || (estranhas >= 3 && estranhas > conhecidos);
-      return { eventos: eventos, naoEntendi: naoEntendi, conversa: conversa };
+      var outroDia = palavras.filter(function (p) { return OUTRO_DIA.test(p); })[0] || null;
+      return { eventos: eventos, naoEntendi: naoEntendi, conversa: conversa, outroDia: outroDia };
     }
 
     function ler(texto, eu) {
-      var eventos = [], naoEntendi = [], ignorados = [];
+      var eventos = [], naoEntendi = [], ignorados = [], gerais = [], vistas = {};
       String(texto || '').split(/[.!;\n]+/).forEach(function (pedaco) {
         // Pergunta ("pode me passar a chave?") é conversa, não produção.
         pedaco.split(/\?/).forEach(function (frase, k, lista) {
@@ -313,10 +383,17 @@
           var pergunta = k < lista.length - 1;
           var r = eventosDaFrase(frase, eu);
           if (pergunta || r.conversa) { ignorados.push(frase.trim()); return; }
+          // O ditado às vezes repete a frase inteira: soma, mas pede para conferir.
+          var igual = normalizar(frase);
+          if (vistas[igual]) gerais.push('A frase “' + frase.trim() + '” apareceu duas vezes e foi somada. Se foi o ditado que repetiu, apague uma.');
+          vistas[igual] = true;
+          if (r.outroDia) gerais.push('Você falou “' + r.outroDia + '”, mas o app grava hoje, na faixa do topo. Outro dia se corrige na planilha.');
           r.eventos.forEach(function (e) { eventos.push(e); });
           r.naoEntendi.forEach(function (p) { naoEntendi.push(p); });
         });
       });
+      // Supervisor que fala sem nome: o app pergunta de quem é, em vez de lançar para ele mesmo.
+      var euPadrao = eu && supervisores.indexOf(eu) < 0 ? eu : null;
 
       // 2) monta as linhas
       var linhas = [];
@@ -421,9 +498,11 @@
           testados: l.testados, finalizados: l.finalizados, defeitos: l.defeitos, semTipo: l.semTipo.slice(),
           supostos: {}, ditoPessoa: '', ditoCategoria: '' };
 
-        var opcoesPessoa = l.pessoaEv ? l.pessoaEv.alvos : (eu ? [eu] : []);
+        var opcoesPessoa = l.pessoaEv ? l.pessoaEv.alvos : (euPadrao ? [euPadrao] : []);
         r.ditoPessoa = l.pessoaEv ? l.pessoaEv.dito : '';
-        if (!l.pessoaEv) r.supostos.pessoa = true;
+        if (!l.pessoaEv && euPadrao) r.supostos.pessoa = true;
+        if (!l.pessoaEv && !euPadrao && eu) r.semNome = true;
+        if (l.pessoaEv && l.pessoaEv.desconhecida) r.pessoaDesconhecida = true;
         var catOpcoes = l.catEv ? l.catEv.alvos : [];
         r.ditoCategoria = l.catEv ? l.catEv.dito : '';
 
@@ -470,8 +549,8 @@
         } else unidas.push(r);
       });
 
-      unidas.forEach(function (r) { r.problemas = problemas(r); r.avisos = avisos(r); });
-      return { linhas: unidas, naoEntendi: naoEntendi, ignorados: ignorados };
+      unidas.forEach(function (r) { r.problemas = problemas(r); r.avisos = avisos(r, dados); });
+      return { linhas: unidas, naoEntendi: naoEntendi, ignorados: ignorados, avisos: gerais };
     }
 
     return { ler: ler, problemas: problemas, avisos: avisos };
@@ -479,7 +558,12 @@
 
   function problemas(r) {
     var lista = [];
-    if (!r.pessoa) lista.push(r.pessoaOpcoes && r.pessoaOpcoes.length ? 'Qual ' + (r.ditoPessoa || 'pessoa') + '?' : 'Falta o nome');
+    if (!r.pessoa) {
+      if (r.pessoaOpcoes && r.pessoaOpcoes.length) lista.push('Qual ' + (r.ditoPessoa || 'pessoa') + '?');
+      else if (r.pessoaDesconhecida) lista.push('“' + r.ditoPessoa + '” não está nas pessoas. Toque para escolher.');
+      else if (r.semNome) lista.push('De quem? Toque para escolher.');
+      else lista.push('Falta o nome');
+    }
     if (!r.categoria) {
       if (r.categoriaOpcoes && r.categoriaOpcoes.length) lista.push('Qual categoria?');
       else if (r.categoriaDesconhecida) lista.push('“' + r.ditoCategoria + '” não está nas categorias. Toque para escolher.');
@@ -491,12 +575,24 @@
     return lista;
   }
 
-  // Avisos não impedem gravar: só pedem para conferir.
-  function avisos(r) {
+  // Avisos não impedem gravar: só pedem para conferir. "dados" (opcional) traz hábitos e máximos da planilha.
+  function avisos(r, dados) {
     var lista = [];
+    var nomes = { testados: 'testados', finalizados: 'finalizados', defeitos: 'defeitos' };
+    var maximo = dados && dados.maximos && r.pessoa && r.categoria ? dados.maximos[r.pessoa + '|' + r.categoria] : 0;
     ['testados', 'finalizados', 'defeitos'].forEach(function (k) {
-      if (r[k] > 100) lista.push('Confira: ' + r[k] + ' ' + k + ' é muito');
+      if (r[k] > 100) lista.push('Confira: ' + r[k] + ' ' + nomes[k] + ' é muito');
+      else if (maximo && r[k] > maximo) lista.push('Confira: ' + r[k] + ' ' + nomes[k] + ' passa do máximo dessa pessoa nessa categoria (' + maximo + ')');
     });
+    var sup = r.supostos || {};
+    if (sup.pessoa && r.pessoa) lista.push('Nome deduzido: confira');
+    if (sup.categoria && r.categoria) lista.push('Categoria deduzida: confira');
+    if (sup.tipo) lista.push('Tipo pelo costume: confira');
+    var costume = dados && dados.habitos && r.pessoa && dados.habitos[r.pessoa] && dados.habitos[r.pessoa].tipo;
+    if (costume && !sup.tipo && !r[costume] && r.testados + r.finalizados + r.defeitos > r.defeitos && !/^valida/.test(normalizar(r.categoria || ''))) {
+      lista.push('Confira o tipo: ' + String(r.pessoa).split(' ')[0].toLowerCase().replace(/^./, function (c) { return c.toUpperCase(); }) +
+        ' costuma lançar ' + costume);
+    }
     return lista;
   }
 

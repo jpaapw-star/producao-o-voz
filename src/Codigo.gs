@@ -10,11 +10,10 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.3.1';
+var VERSAO = '1.4.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var LOG_CABECALHO = ['ID', 'QUANDO', 'QUEM LANÇOU', 'O QUE FOI FALADO', 'LINHAS', 'DESFEITO EM'];
-var DESFAZER_MINUTOS = 30;
 var LINHAS_HISTORICO = 3000;
 var MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro',
   'Novembro', 'Dezembro'];
@@ -115,7 +114,15 @@ function listas_(ss) {
   var cab = cfgAba.getRange(1, 1, 1, cfgAba.getLastColumn()).getValues()[0].map(semAcento_);
   var colPessoas = cab.indexOf('pessoas') + 1 || 1;
   var colCategorias = cab.indexOf('categorias') + 1 || 4;
-  return { pessoas: listaDaColuna_(cfgAba, colPessoas), categorias: listaDaColuna_(cfgAba, colCategorias) };
+  var colCargo = cab.indexOf('cargo') + 1;
+  var supervisores = [];
+  if (colCargo && cfgAba.getLastRow() > 1) {
+    cfgAba.getRange(2, 1, cfgAba.getLastRow() - 1, Math.max(colPessoas, colCargo)).getValues().forEach(function (l) {
+      var nome = String(l[colPessoas - 1]).trim();
+      if (nome && /^supervis/.test(semAcento_(l[colCargo - 1]))) supervisores.push(nome);
+    });
+  }
+  return { pessoas: listaDaColuna_(cfgAba, colPessoas), categorias: listaDaColuna_(cfgAba, colCategorias), supervisores: supervisores };
 }
 
 // Aba "Apelidos": APELIDO | NOME OU CATEGORIA. Criada vazia na primeira vez; você mesmo preenche.
@@ -131,9 +138,38 @@ function apelidos_(ss, l) {
   l.pessoas.concat(l.categorias).forEach(function (x) { oficial[semAcento_(x)] = x; });
   var n = aba.getLastRow();
   if (n < 2) return [];
-  return aba.getRange(2, 1, n - 1, 2).getValues()
-    .map(function (r) { return [String(r[0]).trim(), oficial[semAcento_(r[1])]]; })
-    .filter(function (r) { return r[0] && r[1]; });
+  var vals = aba.getRange(2, 1, n - 1, 3).getValues();
+  var lista = [], mudou = false;
+  // Coluna C diz se o app entendeu a linha, para você ver na hora um nome escrito errado.
+  var situacao = vals.map(function (r) {
+    var apelido = String(r[0]).trim(), alvo = oficial[semAcento_(r[1])];
+    var txt = !apelido && !String(r[1]).trim() ? '' : !apelido ? 'falta o apelido' : !alvo ? 'não achei esse nome em Configurações' : 'ok';
+    if (apelido && alvo) lista.push([apelido, alvo]);
+    if (String(r[2]) !== txt) mudou = true;
+    return [txt];
+  });
+  if (mudou) {
+    if (!String(aba.getRange(1, 3).getValue())) aba.getRange(1, 3).setValue('SITUAÇÃO');
+    aba.getRange(2, 3, situacao.length, 1).setValues(situacao);
+  }
+  return lista;
+}
+
+// Máximo que cada pessoa já fez em cada categoria (aba "Referência Metas"), para avisar número fora do normal.
+function maximos_(ss) {
+  var aba = abaPorNome_(ss, 'Referência Metas');
+  if (!aba || aba.getLastRow() < 2) return {};
+  var vals = aba.getRange(1, 1, aba.getLastRow(), Math.min(aba.getLastColumn(), 12)).getValues();
+  var cab = vals[0].map(semAcento_);
+  var cp = cab.indexOf('pessoa'), cc = cab.indexOf('categoria'), cm = -1;
+  cab.forEach(function (c, i) { if (/^max/.test(c)) cm = i; });
+  if (cp < 0 || cc < 0 || cm < 0) return {};
+  var maximos = {};
+  vals.slice(1).forEach(function (l) {
+    var m = Number(String(l[cm]).replace(',', '.'));
+    if (l[cp] && l[cc] && m > 0) maximos[String(l[cp]).trim() + '|' + String(l[cc]).trim()] = m;
+  });
+  return maximos;
 }
 
 function ehData_(v) {
@@ -196,6 +232,8 @@ function apiInicio() {
     pessoas: l.pessoas,
     categorias: l.categorias,
     apelidos: apelidos_(ss, l),
+    supervisores: l.supervisores,
+    maximos: maximos_(ss),
     habitos: h.habitos,
     ativos: h.ativos,
     hora: Number(Utilities.formatDate(new Date(), tz, 'H'))
@@ -288,7 +326,15 @@ function apiGravar(pedido) {
       return linha;
     });
 
+    // Outro app (ou alguém digitando) pode ter escrito embaixo entre a leitura e agora: anda até achar linhas vazias.
     var primeira = ultima + 1;
+    for (var tentativa = 0; tentativa < 5; tentativa++) {
+      var alvo = aba.getRange(primeira, col.pessoa + 1, valores.length, 1).getValues();
+      var ocupada = -1;
+      alvo.forEach(function (v, k) { if (String(v[0]).trim()) ocupada = k; });
+      if (ocupada < 0) break;
+      primeira += ocupada + 1;
+    }
     var falta = primeira + valores.length - 1 - aba.getMaxRows();
     if (falta > 0) aba.insertRowsAfter(aba.getMaxRows(), falta);
     var destino = aba.getRange(primeira, 1, valores.length, col.largura);
@@ -358,6 +404,34 @@ function assinatura_(linha, col) {
     .map(function (k) { return col[k] === undefined ? '' : String(linha[col[k]]).trim(); }).join('|');
 }
 
+// Lançamentos de hoje feitos por quem está no aparelho, do mais novo para o mais velho.
+function apiHoje(quem) {
+  var cfg = config_();
+  var ss = abrir_(cfg);
+  var tz = ss.getSpreadsheetTimeZone();
+  var log = ss.getSheetByName(LOG_ABA);
+  if (!log || log.getLastRow() < 2) return [];
+  var n = log.getLastRow();
+  var inicio = Math.max(2, n - 300);
+  var hoje = Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy');
+  var alvo = semAcento_(quem);
+  var lista = [];
+  log.getRange(inicio, 1, n - inicio + 1, LOG_CABECALHO.length).getDisplayValues().forEach(function (r) {
+    if (String(r[1]).indexOf(hoje) !== 0 || semAcento_(r[2]) !== alvo) return;
+    var linhas = [];
+    try { linhas = JSON.parse(r[4]).linhas; } catch (e) {}
+    lista.push({
+      id: r[0], hora: String(r[1]).slice(11, 16), desfeito: !!r[5],
+      linhas: linhas.map(function (a) {
+        var p = String(a).split('|');
+        return { pessoa: p[2], categoria: p[3], testados: Number(p[4]) || 0, finalizados: Number(p[5]) || 0,
+          defeitos: Number(p[6]) || 0, faixa: p[7] + ' – ' + p[8] };
+      })
+    });
+  });
+  return lista.reverse();
+}
+
 function apiDesfazer(id) {
   var cfg = config_();
   var ss = abrir_(cfg);
@@ -375,7 +449,9 @@ function apiDesfazer(id) {
     if (!registro) throw new Error('Lançamento não encontrado.');
     if (registro[5]) throw new Error('Esse lançamento já foi desfeito.');
     var quando = ehData_(registro[1]) ? registro[1] : Utilities.parseDate(String(registro[1]), tz, 'dd/MM/yyyy HH:mm:ss');
-    if (Date.now() - quando.getTime() > DESFAZER_MINUTOS * 60000) throw new Error('Só dá para desfazer até ' + DESFAZER_MINUTOS + ' minutos depois.');
+    if (Utilities.formatDate(quando, tz, 'yyyy-MM-dd') !== Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd')) {
+      throw new Error('Só dá para desfazer lançamentos de hoje. Os mais antigos se corrigem na planilha.');
+    }
 
     var faltando = JSON.parse(registro[4]).linhas.slice();
     var aba = abaPorNome_(ss, 'Registros');

@@ -91,9 +91,11 @@ test('erros de ditado comuns', () => {
   assert.deepStrictEqual(resumo(r), [['JANINE RODRIGUES', 'NOTEBOOK', 0, 6, 0], ['SAMUEL BRITO', 'VOLANTE', 1, 0, 0]]);
 });
 
-test('palavras desconhecidas aparecem para conferir', () => {
+test('palavra estranha no lugar do nome pergunta de quem é, em vez de lançar para quem está no aparelho', () => {
   const r = leitor().ler('Fulano notebook 2 finalizados', 'ANA LEAL');
-  assert.deepStrictEqual(r.naoEntendi, ['fulano']);
+  assert.strictEqual(r.linhas[0].pessoa, null);
+  assert.deepStrictEqual(r.linhas[0].problemas, ['“fulano” não está nas pessoas. Toque para escolher.']);
+  assert.strictEqual(leitor().ler('notebook 2 finalizados galera', 'ANA LEAL').linhas[0].pessoa, 'ANA LEAL');
 });
 
 test('frase repetida soma na mesma linha', () => {
@@ -209,4 +211,42 @@ test('"mouses" é MOUSE e "web cans" separado é WEBCAM (frase do João)', () =>
   assert.ok(r.linhas.every((x) => x.problemas.length === 0));
   // "meses" continua sendo "mes", e não quebra palavras que já casavam.
   assert.deepStrictEqual(resumo(leitor().ler('Ana Leal 2 roteadores testados', '')), [['ANA LEAL', 'ROTEADOR', 2, 0, 0]]);
+});
+
+test('segunda rodada: correção falada, dúzia, horário, frase repetida e "ontem"', () => {
+  const l = L.criarLeitor({ pessoas, categorias: ['NOTEBOOK', 'MOUSE', 'FONE', 'ROTEADOR'], habitos: {}, ativos: [] });
+  const r = (t) => resumo(l.ler(t, 'JOÃO PEDRO'));
+  assert.deepStrictEqual(r('Julia 3 notebooks finalizados não 4 notebooks finalizados'), [['JULIA GOMES', 'NOTEBOOK', 0, 4, 0]]);
+  assert.deepStrictEqual(r('Julia 3 notebooks, quer dizer, 4 finalizados'), [['JULIA GOMES', 'NOTEBOOK', 0, 4, 0]]);
+  assert.deepStrictEqual(r('Julia notebook não tem defeito, 3 finalizados'), [['JULIA GOMES', 'NOTEBOOK', 0, 3, 0]]);
+  assert.deepStrictEqual(r('Julia 3 notebooks finalizados, não teve nenhum defeito'), [['JULIA GOMES', 'NOTEBOOK', 0, 3, 0]]);
+  assert.deepStrictEqual(r('meia dúzia de fones testados'), [['JOÃO PEDRO', 'FONE', 6, 0, 0]]);
+  assert.deepStrictEqual(r('Julia duas dúzias de mouses finalizados'), [['JULIA GOMES', 'MOUSE', 0, 24, 0]]);
+  assert.deepStrictEqual(r('Julia três notebooks finalizados na hora das nove'), [['JULIA GOMES', 'NOTEBOOK', 0, 3, 0]]);
+  assert.deepStrictEqual(r('das 9 às 10 Julia 5 fones testados'), [['JULIA GOMES', 'FONE', 5, 0, 0]]);
+  assert.deepStrictEqual(r('Julia 2 fones testados às 9 horas'), [['JULIA GOMES', 'FONE', 2, 0, 0]]);
+  const rep = l.ler('Julia 3 notebooks finalizados. Julia 3 notebooks finalizados', 'JOÃO PEDRO');
+  assert.deepStrictEqual(resumo(rep), [['JULIA GOMES', 'NOTEBOOK', 0, 6, 0]]);
+  assert.match(rep.avisos[0], /apareceu duas vezes/);
+  assert.match(l.ler('Julia 2 fones testados ontem', 'JOÃO PEDRO').avisos[0], /“ontem”/);
+});
+
+test('supervisor sem dizer nome: pergunta de quem é; colaborador sem nome: vai para ele', () => {
+  const l = L.criarLeitor({ pessoas, categorias, habitos: {}, ativos: [], supervisores: ['JOÃO PEDRO'] });
+  const sup = l.ler('3 notebooks finalizados', 'JOÃO PEDRO');
+  assert.strictEqual(sup.linhas[0].pessoa, null);
+  assert.deepStrictEqual(sup.linhas[0].problemas, ['De quem? Toque para escolher.']);
+  assert.strictEqual(l.ler('eu 3 notebooks finalizados', 'JOÃO PEDRO').linhas[0].pessoa, 'JOÃO PEDRO');
+  assert.strictEqual(l.ler('3 notebooks finalizados', 'ANA LEAL').linhas[0].pessoa, 'ANA LEAL');
+});
+
+test('avisos: máximo da pessoa, tipo fora do costume e coisas deduzidas', () => {
+  const dados = { maximos: { 'JULIA GOMES|ROTEADOR': 30 }, habitos: { 'JULIA GOMES': { categorias: ['ROTEADOR'], tipo: 'finalizados' } } };
+  assert.deepStrictEqual(L.avisos({ pessoa: 'JULIA GOMES', categoria: 'ROTEADOR', testados: 40, finalizados: 0, defeitos: 0, supostos: {} }, dados), [
+    'Confira: 40 testados passa do máximo dessa pessoa nessa categoria (30)',
+    'Confira o tipo: Julia costuma lançar finalizados'
+  ]);
+  assert.deepStrictEqual(L.avisos({ pessoa: 'JULIA GOMES', categoria: 'ROTEADOR', testados: 0, finalizados: 20, defeitos: 1, supostos: {} }, dados), []);
+  assert.deepStrictEqual(L.avisos({ pessoa: 'ANA LEAL', categoria: 'FONE', testados: 2, finalizados: 0, defeitos: 0, supostos: { pessoa: true, categoria: true } }, dados),
+    ['Nome deduzido: confira', 'Categoria deduzida: confira']);
 });

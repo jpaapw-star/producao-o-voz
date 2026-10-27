@@ -27,6 +27,7 @@ function criarAba(nome, linhas) {
       const ler = (f) => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => f(r + i, c + j)));
       return {
         getValues: () => ler(celula),
+        getValue: () => celula(r, c),
         getDisplayValues: () => ler((a, b) => { const v = celula(a, b); return v instanceof Date ? formatar(v, 'America/Sao_Paulo', 'dd/MM/yyyy') : String(v); }),
         getFormulas: () => ler((a, b) => formulas[a + ',' + b] || ''),
         getFormulasR1C1: () => ler((a, b) => formulas[a + ',' + b] || ''),
