@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.5.0';
+var VERSAO = '1.5.1';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var LOG_CABECALHO = ['ID', 'QUANDO', 'QUEM LANÇOU', 'O QUE FOI FALADO', 'LINHAS', 'DESFEITO EM'];
@@ -348,6 +348,7 @@ function apiGravar(pedido) {
     }
 
     SpreadsheetApp.flush();
+    if (col.mes !== undefined) consertarMes_(aba, col, Math.max(col.linhaCabecalho + 1, primeira - 200), primeira + valores.length - 1, tz);
     var gravadas = destino.getDisplayValues().map(function (v) { return assinatura_(v, col); });
 
     var id = Utilities.getUuid().slice(0, 8);
@@ -358,6 +359,29 @@ function apiGravar(pedido) {
   } finally {
     trava.releaseLock();
   }
+}
+
+// A coluna do mês tem de aparecer como nas outras linhas ("Outubro/2026"). Se aparecer número (46296, que é a data
+// 01/10/2026 sem formato) ou data, troca pelo texto do mês, tirado da coluna DATA da mesma linha.
+function consertarMes_(aba, col, de, ate, tz) {
+  if (ate < de) return 0;
+  var n = ate - de + 1;
+  var mes = aba.getRange(de, col.mes + 1, n, 1).getDisplayValues();
+  var datas = aba.getRange(de, col.data + 1, n, 1).getDisplayValues();
+  var porNome = mes.some(function (m) { return /^[A-Za-zÀ-ú]+\/\d{4}$/.test(String(m[0]).trim()); });
+  if (!porNome) return 0;
+  var consertadas = 0;
+  mes.forEach(function (m, i) {
+    var v = String(m[0]).trim();
+    if (!/^\d+([.,]\d+)?$/.test(v) && !/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(v)) return;
+    var d = dataTexto_(datas[i][0], tz);
+    if (!d) return;
+    var celula = aba.getRange(de + i, col.mes + 1);
+    celula.setNumberFormat('@');
+    celula.setValue(MESES[Number(d.slice(5, 7)) - 1] + '/' + d.slice(0, 4));
+    consertadas++;
+  });
+  return consertadas;
 }
 
 function colunasComArrayFormula_(aba, col) {

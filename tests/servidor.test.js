@@ -147,3 +147,14 @@ test('grava abaixo de linha que outro app escreveu, e lista e desfaz lançamento
   s.apiDesfazer(r.id);
   assert.strictEqual(JSON.parse(JSON.stringify(s.apiHoje('ANA LEAL')))[0].desfeito, true);
 });
+
+test('mês que aparece como número (46296) volta a ser "Outubro/2026"', () => {
+  const p = planilha();
+  const reg = p.getSheetByName('Registros');
+  reg.dados[1][0] = 'Outubro/2026';
+  reg.dados.push([46296, '27/10/2026', '11:32', 'ANA LEAL', 'NOTEBOOK', 1, 0, 0, '11:00', '12:00']);
+  const s = carregarServidor(p);
+  s.apiGravar({ quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'ANA LEAL', categoria: 'FONE', testados: 1 }] });
+  assert.strictEqual(reg.dados[4][0], 'Outubro/2026');
+  assert.match(String(reg.dados[5][0]), /^[A-ZÇ][a-zç]+\/\d{4}$/);
+});

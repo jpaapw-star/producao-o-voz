@@ -37,6 +37,7 @@ function criarAba(nome, linhas) {
             dados[r + i - 1][c + j - 1] = x;
           }));
         },
+        setNumberFormat: () => {},
         setValue: (x) => { while (dados.length < r) dados.push([]); dados[r - 1][c - 1] = x; },
         setFormulaR1C1: (fx) => { for (let i = 0; i < nr; i++) formulas[(r + i) + ',' + c] = fx; },
         copyTo: () => {}
