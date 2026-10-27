@@ -239,7 +239,8 @@
         .split(' ').filter(Boolean);
       var brutos = lerNumeros(palavras);
       var fichas = brutos.filter(function (b) { return typeof b === 'object' || !LIGACOES[b]; }).map(function (b) {
-        if (typeof b === 'object') return { num: b.num, orig: b.orig };
+        // O número também tem "chave", para casar com categorias como "PLAYSTATION 5".
+        if (typeof b === 'object') return { num: b.num, orig: b.orig, chave: String(b.num) };
         return { palavra: b, chave: chave(b) };
       });
       var eventos = [], naoEntendi = [], conhecidos = 0, cancelou = false;
@@ -250,7 +251,7 @@
         if (f.palavra === 'eu' || f.palavra === 'mim') { eventos.push({ e: 'pessoa', alvos: eu ? [eu] : [], eu: true, dito: f.palavra }); continue; }
         var achou = casar(fichas, i, apelidos);
         if (achou) {
-          var dito = fichas.slice(i, i + achou.tamanho).map(function (x) { return x.palavra; }).join(' ');
+          var dito = fichas.slice(i, i + achou.tamanho).map(function (x) { return x.palavra || x.orig; }).join(' ');
           eventos.push({ e: achou.tipo, alvos: achou.alvos, dito: dito });
           conhecidos++;
           i += achou.tamanho - 1;
@@ -442,11 +443,11 @@
         } else unidas.push(r);
       });
 
-      unidas.forEach(function (r) { r.problemas = problemas(r); });
+      unidas.forEach(function (r) { r.problemas = problemas(r); r.avisos = avisos(r); });
       return { linhas: unidas, naoEntendi: naoEntendi, ignorados: ignorados };
     }
 
-    return { ler: ler, problemas: problemas };
+    return { ler: ler, problemas: problemas, avisos: avisos };
   }
 
   function problemas(r) {
@@ -459,10 +460,20 @@
     }
     if (r.semTipo && r.semTipo.length) lista.push('Testados, finalizados ou defeitos?');
     if (!(r.semTipo && r.semTipo.length) && r.testados + r.finalizados + r.defeitos === 0) lista.push('Falta a quantidade');
+    if (r.categoria && /^valida/.test(normalizar(r.categoria)) && r.finalizados) lista.push('Validação é só testados ou defeitos');
     return lista;
   }
 
-  var api = { criarLeitor: criarLeitor, normalizar: normalizar, chave: chave, problemas: problemas };
+  // Avisos não impedem gravar: só pedem para conferir.
+  function avisos(r) {
+    var lista = [];
+    ['testados', 'finalizados', 'defeitos'].forEach(function (k) {
+      if (r[k] > 100) lista.push('Confira: ' + r[k] + ' ' + k + ' é muito');
+    });
+    return lista;
+  }
+
+  var api = { criarLeitor: criarLeitor, normalizar: normalizar, chave: chave, problemas: problemas, avisos: avisos };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   raiz.LeitorProducao = api;
 })(this);

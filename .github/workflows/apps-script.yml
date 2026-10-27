@@ -2,7 +2,6 @@
 # Configuração única (veja docs/INSTALACAO.md):
 #   segredo CLASPRC_JSON  : o mesmo conteúdo usado nos repositórios do Preço Médio e da Memória Global
 #   segredo PLANILHA_ID   : ID da planilha de produção
-#   segredo CODIGO_EQUIPE : código que a equipe digita no celular
 # Na primeira vez o projeto do Apps Script é criado sozinho e o .clasp.json volta para o repositório.
 name: Apps Script
 
@@ -40,16 +39,15 @@ jobs:
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
           PLANILHA_ID: ${{ secrets.PLANILHA_ID }}
-          CODIGO_EQUIPE: ${{ secrets.CODIGO_EQUIPE }}
         run: |
-          for s in CLASPRC_JSON PLANILHA_ID CODIGO_EQUIPE; do
+          for s in CLASPRC_JSON PLANILHA_ID; do
             if [ -z "${!s}" ]; then echo "::error::Falta o segredo $s (veja docs/INSTALACAO.md)."; exit 1; fi
           done
           npm install -g @google/clasp@2.4.2
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           node -e '
             const id = process.env.PLANILHA_ID.trim().replace(/^.*\/d\/([^/]+).*$/, "$1");
-            const s = { planilhaId: id, codigoEquipe: process.env.CODIGO_EQUIPE.trim() };
+            const s = { planilhaId: id };
             require("fs").writeFileSync("src/00_Segredos.gs", "var SEGREDOS = " + JSON.stringify(s) + ";\n");
           '
       - name: Criar o projeto do Apps Script (só na primeira vez)

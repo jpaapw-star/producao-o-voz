@@ -175,3 +175,16 @@ test('"videogame" junto casa com "VÍDEO GAME" e validações de várias categor
   assert.deepStrictEqual(resumo(l.ler('Julia 4 video games testados', '')), [['JULIA GOMES', 'VÍDEO GAME', 4, 0, 0]]);
   assert.deepStrictEqual(resumo(l.ler('Julia 2 videogames validados', '')), [['JULIA GOMES', 'VALIDAÇÃO VÍDEO GAME', 2, 0, 0]]);
 });
+
+test('categoria com número no nome (PlayStation 5)', () => {
+  const r = L.criarLeitor({ pessoas, categorias: categorias.concat(['PLAYSTATION 5', 'PLAYSTATION 4']), habitos: {}, ativos: [] })
+    .ler('Julia playstation 5 três testados', 'JOÃO PEDRO');
+  assert.deepStrictEqual(resumo(r), [['JULIA GOMES', 'PLAYSTATION 5', 3, 0, 0]]);
+});
+
+test('validação com finalizados é problema e quantidade alta vira aviso', () => {
+  assert.deepStrictEqual(L.problemas({ pessoa: 'ANA LEAL', categoria: 'VALIDAÇÃO NOTEBOOK', testados: 0, finalizados: 2, defeitos: 0 }),
+    ['Validação é só testados ou defeitos']);
+  assert.deepStrictEqual(L.avisos({ testados: 150, finalizados: 3, defeitos: 0 }), ['Confira: 150 testados é muito']);
+  assert.deepStrictEqual(L.avisos({ testados: 100, finalizados: 3, defeitos: 0 }), []);
+});

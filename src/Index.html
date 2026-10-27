@@ -78,12 +78,10 @@
 
 <div id="tCarregando" class="tela ativa"><div class="carregando">Abrindo…</div></div>
 
-<div id="tCodigo" class="tela">
+<div id="tErro" class="tela">
   <h1>Produção</h1>
-  <p class="sub">Digite o código da equipe. Você só faz isso uma vez neste aparelho.</p>
-  <input id="codigo" class="campo" type="password" autocomplete="off" autocapitalize="off" placeholder="Código da equipe">
-  <div id="erroCodigo" class="erro"></div>
-  <div class="rodape"><button id="entrar">Entrar</button></div>
+  <div id="erroInicio" class="erro"></div>
+  <div class="rodape"><button id="tentar">Tentar de novo</button></div>
 </div>
 
 <div id="tQuem" class="tela">
@@ -123,11 +121,11 @@
     por: function (k, v) { try { localStorage.setItem('producao.' + k, v); } catch (e) {} },
     tirar: function (k) { try { localStorage.removeItem('producao.' + k); } catch (e) {} }
   };
-  var estado = { codigo: guardar.ler('codigo'), quem: guardar.ler('quem'), dados: null, leitor: null,
+  var estado = { quem: guardar.ler('quem'), dados: null, leitor: null,
     hora: null, linhas: [], ajustes: {}, ultimo: null, gravando: false };
 
   function tela(id) {
-    ['tCarregando', 'tCodigo', 'tQuem', 'tLancar'].forEach(function (t) { $(t).classList.toggle('ativa', t === id); });
+    ['tCarregando', 'tErro', 'tQuem', 'tLancar'].forEach(function (t) { $(t).classList.toggle('ativa', t === id); });
   }
 
   function chamar(nome) {
@@ -142,31 +140,21 @@
 
   /* ---------- entrada ---------- */
   function iniciar() {
-    if (!estado.codigo) { tela('tCodigo'); $('codigo').focus(); return; }
+    guardar.tirar('codigo');
     tela('tCarregando');
-    chamar('apiInicio', estado.codigo).then(function (d) {
+    chamar('apiInicio').then(function (d) {
       estado.dados = d;
       estado.leitor = LeitorProducao.criarLeitor(d);
       estado.hora = d.hora;
+      // Diferença entre o relógio do servidor e o do aparelho, para a faixa seguir a hora certa.
+      estado.ajusteHora = d.hora - new Date().getHours();
       if (!estado.quem || d.pessoas.indexOf(estado.quem) < 0) { mostrarPessoas(); return; }
       abrirLancar();
     }).catch(function (e) {
-      if (mensagem(e) === 'CODIGO_ERRADO') {
-        guardar.tirar('codigo'); estado.codigo = '';
-        tela('tCodigo'); $('erroCodigo').textContent = 'Código errado.';
-      } else {
-        tela('tCodigo'); $('erroCodigo').textContent = mensagem(e);
-      }
+      tela('tErro'); $('erroInicio').textContent = mensagem(e);
     });
   }
-
-  $('entrar').onclick = function () {
-    var c = $('codigo').value.trim();
-    if (!c) return;
-    estado.codigo = c; guardar.por('codigo', c); $('erroCodigo').textContent = '';
-    iniciar();
-  };
-  $('codigo').onkeydown = function (e) { if (e.key === 'Enter') $('entrar').click(); };
+  $('tentar').onclick = iniciar;
 
   function mostrarPessoas() {
     tela('tQuem');
@@ -192,19 +180,44 @@
   function abrirLancar() {
     tela('tLancar');
     $('trocarQuem').textContent = estado.quem;
+    if (!$('fala').value) $('fala').value = guardar.ler('rascunho');
     desenharFaixa();
     atualizar();
   }
+
+  function horaAgora() { return (new Date().getHours() + (estado.ajusteHora || 0) + 24) % 24; }
+
+  // A faixa acompanha o relógio até alguém mudar à mão.
+  setInterval(function () {
+    if (estado.dados && !estado.horaManual && estado.hora !== horaAgora()) { estado.hora = horaAgora(); desenharFaixa(); }
+  }, 30000);
+
+  // Pessoas e categorias novas na planilha entram sozinhas: a cada 10 minutos e ao voltar para o app.
+  var ultimaAtualizacao = Date.now();
+  function atualizarListas() {
+    if (!estado.dados || Date.now() - ultimaAtualizacao < 60000) return;
+    ultimaAtualizacao = Date.now();
+    chamar('apiInicio').then(function (d) {
+      estado.dados = d;
+      estado.leitor = LeitorProducao.criarLeitor(d);
+      if ($('tLancar').classList.contains('ativa')) atualizar();
+    }).catch(function () {});
+  }
+  setInterval(atualizarListas, 600000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) atualizarListas(); });
 
   function desenharFaixa() {
     var dois = function (n) { return ('0' + ((n + 24) % 24)).slice(-2) + ':00'; };
     $('faixa').textContent = dois(estado.hora) + ' – ' + dois(estado.hora + 1);
   }
-  $('faixaMenos').onclick = function () { estado.hora = (estado.hora + 23) % 24; desenharFaixa(); };
-  $('faixaMais').onclick = function () { estado.hora = (estado.hora + 1) % 24; desenharFaixa(); };
+  $('faixaMenos').onclick = function () { estado.hora = (estado.hora + 23) % 24; estado.horaManual = true; desenharFaixa(); };
+  $('faixaMais').onclick = function () { estado.hora = (estado.hora + 1) % 24; estado.horaManual = true; desenharFaixa(); };
 
   var espera = null;
-  $('fala').oninput = function () { clearTimeout(espera); espera = setTimeout(atualizar, 150); };
+  $('fala').oninput = function () {
+    guardar.por('rascunho', this.value);
+    clearTimeout(espera); espera = setTimeout(atualizar, 150);
+  };
 
   function chaveLinha(l, i) { return i + '|' + l.ditoPessoa + '|' + l.ditoCategoria; }
 
@@ -214,6 +227,7 @@
       var aj = estado.ajustes[chaveLinha(l, i)];
       if (aj) Object.keys(aj).forEach(function (k) { l[k] = aj[k]; });
       l.problemas = LeitorProducao.problemas(l);
+      l.avisos = LeitorProducao.avisos(l);
       l.chave = chaveLinha(l, i);
       return l;
     }).filter(function (l) { return !l.removida; });
@@ -283,6 +297,7 @@
         return !(/^Qual|^Testados/.test(p));
       });
       if (outros.length) c.appendChild(el('div', 'duvida', outros.join(' · ')));
+      if (l.avisos.length) c.appendChild(el('div', 'naoentendi', l.avisos.join(' · ')));
       caixa.appendChild(c);
     });
     var prontas = estado.linhas.filter(function (l) { return !l.problemas.length; }).length;
@@ -320,47 +335,56 @@
     s.focus();
   }
 
-  $('gravar').onclick = function () {
+  function gravar(confirmarRepetidos) {
     if (estado.gravando) return;
     estado.gravando = true; desenhar();
     var pedido = {
-      quem: estado.quem, hora: estado.hora, texto: $('fala').value,
+      quem: estado.quem, hora: estado.hora, texto: $('fala').value, confirmarRepetidos: !!confirmarRepetidos,
       linhas: estado.linhas.map(function (l) {
         return { pessoa: l.pessoa, categoria: l.categoria, testados: l.testados, finalizados: l.finalizados, defeitos: l.defeitos };
       })
     };
-    chamar('apiGravar', estado.codigo, pedido).then(function (r) {
+    chamar('apiGravar', pedido).then(function (r) {
       estado.gravando = false;
+      if (r.repetidas) {
+        desenhar();
+        avisar('Já tem lançamento de ' + r.repetidas.join(', ') + ' em ' + r.faixa + '.', 'Gravar mesmo assim', function () { gravar(true); }, 20000);
+        return;
+      }
       estado.ultimo = r.id;
-      $('fala').value = ''; estado.ajustes = {};
+      estado.horaManual = false;
+      $('fala').value = ''; guardar.tirar('rascunho'); estado.ajustes = {};
       atualizar();
-      avisar('Gravado: ' + r.n + (r.n === 1 ? ' linha' : ' linhas') + ' · ' + r.faixa, true);
+      avisar('Gravado: ' + r.n + (r.n === 1 ? ' linha' : ' linhas') + ' · ' + r.faixa, 'Desfazer', desfazer, 15000);
     }).catch(function (e) {
       estado.gravando = false; desenhar();
-      if (mensagem(e) === 'CODIGO_ERRADO') { guardar.tirar('codigo'); estado.codigo = ''; iniciar(); return; }
-      avisar('Não gravou: ' + mensagem(e), false);
+      avisar('Não gravou: ' + mensagem(e));
     });
-  };
+  }
+  $('gravar').onclick = function () { gravar(false); };
 
-  var timerAviso = null;
-  function avisar(texto, podeDesfazer) {
+  var timerAviso = null, acaoAviso = null;
+  function avisar(texto, botao, acao, tempo) {
     $('avisoTexto').textContent = texto;
-    $('desfazer').style.display = podeDesfazer ? '' : 'none';
+    acaoAviso = acao || null;
+    $('desfazer').textContent = botao || '';
+    $('desfazer').style.display = botao ? '' : 'none';
     $('aviso').style.display = 'flex';
     clearTimeout(timerAviso);
-    timerAviso = setTimeout(function () { $('aviso').style.display = 'none'; }, podeDesfazer ? 15000 : 6000);
+    timerAviso = setTimeout(function () { $('aviso').style.display = 'none'; }, tempo || 6000);
   }
+  $('desfazer').onclick = function () { if (acaoAviso) acaoAviso(); };
 
-  $('desfazer').onclick = function () {
+  function desfazer() {
     var id = estado.ultimo;
     if (!id) return;
     $('desfazer').style.display = 'none';
     $('avisoTexto').textContent = 'Desfazendo…';
-    chamar('apiDesfazer', estado.codigo, id).then(function (r) {
+    chamar('apiDesfazer', id).then(function (r) {
       estado.ultimo = null;
-      avisar(r.naoAchadas ? 'Desfeito em parte: ' + r.naoAchadas + ' linha(s) já tinham mudado.' : 'Desfeito.', false);
-    }).catch(function (e) { avisar('Não desfez: ' + mensagem(e), false); });
-  };
+      avisar(r.naoAchadas ? 'Desfeito em parte: ' + r.naoAchadas + ' linha(s) já tinham mudado.' : 'Desfeito.');
+    }).catch(function (e) { avisar('Não desfez: ' + mensagem(e)); });
+  }
 
   iniciar();
 })();

@@ -24,14 +24,16 @@ function planilha() {
   });
 }
 
-test('código errado é recusado', () => {
+test('entra sem código; sem planilha configurada avisa', () => {
   const s = carregarServidor(planilha());
-  assert.throws(() => s.apiInicio('errado'), /CODIGO_ERRADO/);
+  assert.ok(s.apiInicio().pessoas.length);
+  s.SEGREDOS.planilhaId = '';
+  assert.throws(() => s.apiInicio(), /não foi configurado/);
 });
 
 test('início traz listas e hábitos', () => {
   const s = carregarServidor(planilha());
-  const d = JSON.parse(JSON.stringify(s.apiInicio(' ABC123 ')));
+  const d = JSON.parse(JSON.stringify(s.apiInicio()));
   assert.deepStrictEqual(d.pessoas, ['ANA LEAL', 'DANIEL VARGAS', 'JULIA GOMES']);
   assert.deepStrictEqual(d.categorias, ['NOTEBOOK', 'CAIXA DE SOM', 'ROTEADOR', 'FONE']);
   assert.deepStrictEqual(d.habitos['DANIEL VARGAS'], { categorias: ['CAIXA DE SOM'], tipo: 'finalizados' });
@@ -41,7 +43,7 @@ test('início traz listas e hábitos', () => {
 test('grava no fim de Registros sem tocar no resto, e o Desfazer apaga só o que gravou', () => {
   const p = planilha();
   const s = carregarServidor(p);
-  const r = s.apiGravar('abc123', {
+  const r = s.apiGravar({
     quem: 'ANA LEAL', hora: 10, texto: 'Julia roteador 4 testados; Ana notebook 2 finalizados',
     linhas: [
       { pessoa: 'julia gomes', categoria: 'roteador', testados: 4, finalizados: 0, defeitos: 0 },
@@ -63,18 +65,18 @@ test('grava no fim de Registros sem tocar no resto, e o Desfazer apaga só o que
   assert.strictEqual(log[1][2], 'ANA LEAL');
 
   // Outra pessoa lança depois; o Desfazer não pode apagar a linha dela.
-  s.apiGravar('abc123', { quem: 'DANIEL VARGAS', hora: 10, linhas: [{ pessoa: 'DANIEL VARGAS', categoria: 'FONE', finalizados: 1 }] });
-  const d = s.apiDesfazer('abc123', r.id);
+  s.apiGravar({ quem: 'DANIEL VARGAS', hora: 10, linhas: [{ pessoa: 'DANIEL VARGAS', categoria: 'FONE', finalizados: 1 }] });
+  const d = s.apiDesfazer(r.id);
   assert.strictEqual(d.apagadas, 2);
   assert.deepStrictEqual(reg.slice(3).map((l) => l[3] + ' ' + l[4]), ['DANIEL VARGAS CAIXA DE SOM', 'DANIEL VARGAS FONE']);
-  assert.throws(() => s.apiDesfazer('abc123', r.id), /já foi desfeito/);
+  assert.throws(() => s.apiDesfazer(r.id), /já foi desfeito/);
 });
 
 test('recusa pessoa ou categoria fora da lista e linha vazia', () => {
   const s = carregarServidor(planilha());
-  assert.throws(() => s.apiGravar('abc123', { quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'FULANO', categoria: 'NOTEBOOK', testados: 1 }] }), /pessoa fora da lista/);
-  assert.throws(() => s.apiGravar('abc123', { quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'ANA LEAL', categoria: 'CARRO', testados: 1 }] }), /categoria fora da lista/);
-  assert.throws(() => s.apiGravar('abc123', { quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'ANA LEAL', categoria: 'NOTEBOOK' }] }), /sem quantidade/);
+  assert.throws(() => s.apiGravar({ quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'FULANO', categoria: 'NOTEBOOK', testados: 1 }] }), /pessoa fora da lista/);
+  assert.throws(() => s.apiGravar({ quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'ANA LEAL', categoria: 'CARRO', testados: 1 }] }), /categoria fora da lista/);
+  assert.throws(() => s.apiGravar({ quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'ANA LEAL', categoria: 'NOTEBOOK' }] }), /sem quantidade/);
 });
 
 test('coluna com ARRAYFORMULA fica vazia e fórmula da linha de cima é repetida', () => {
@@ -82,6 +84,25 @@ test('coluna com ARRAYFORMULA fica vazia e fórmula da linha de cima é repetida
   const reg = p.getSheetByName('Registros');
   reg._formulas['1,1'] = '=ARRAYFORMULA(TEXT(B2:B;"mmmm/yyyy"))';
   const s = carregarServidor(p);
-  s.apiGravar('abc123', { quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', testados: 1 }] });
+  s.apiGravar({ quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', testados: 1 }] });
   assert.strictEqual(reg.dados[4][0], '');
+});
+
+test('mesma pessoa e categoria na mesma faixa pede confirmação antes de gravar de novo', () => {
+  const p = planilha();
+  const s = carregarServidor(p);
+  const pedido = { quem: 'DANIEL VARGAS', hora: 9, linhas: [{ pessoa: 'DANIEL VARGAS', categoria: 'CAIXA DE SOM', finalizados: 2 }] };
+  const r = s.apiGravar(pedido);
+  assert.strictEqual(r.ok, false);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(r.repetidas)), ['DANIEL VARGAS · CAIXA DE SOM']);
+  assert.strictEqual(p.getSheetByName('Registros').dados.length, 4);
+  assert.strictEqual(s.apiGravar(Object.assign({ confirmarRepetidos: true }, pedido)).n, 1);
+  assert.strictEqual(s.apiGravar(Object.assign({}, pedido, { hora: 11 })).n, 1);
+});
+
+test('coluna de quantidade faltando no cabeçalho avisa em vez de gravar errado', () => {
+  const p = planilha();
+  p.getSheetByName('Registros').dados[0][7] = 'OUTRA COISA';
+  const s = carregarServidor(p);
+  assert.throws(() => s.apiGravar({ quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', testados: 1 }] }), /coluna de: defeitos/);
 });
