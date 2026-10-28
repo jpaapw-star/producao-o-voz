@@ -42,6 +42,7 @@ Com a IA do Google, a conversa entende erros de fala, "é… hum…", correçõe
 
 1. Entre em https://aistudio.google.com/apikey com a sua conta Google e clique em **Create API key** (plano gratuito; não precisa de cartão).
 2. No GitHub do app: **Settings › Secrets and variables › Actions › New repository secret**, nome `IA_CHAVE`, valor = a chave. Nunca mande a chave por chat.
+   - Reserva opcional: chave do Ollama Cloud (ollama.com › Settings › Keys) no segredo `OLLAMA_API_KEY`; é usada quando o Gemini está ocupado.
 3. Depois da publicação: abra o projeto no Apps Script (script.google.com, "Produção por voz"), escolha a função **autorizarIA** no topo e clique em **Executar**; aceite a permissão nova ("Conectar a um serviço externo"). Sem isso o app fica pedindo autorização.
 
 - O segredo antigo `CODIGO_EQUIPE` não é mais usado e pode ser apagado.

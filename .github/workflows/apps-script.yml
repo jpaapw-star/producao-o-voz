@@ -3,6 +3,7 @@
 #   segredo CLASPRC_JSON  : o mesmo conteúdo usado nos repositórios do Preço Médio e da Memória Global
 #   segredo PLANILHA_ID   : ID da planilha de produção
 #   segredo IA_CHAVE      : (opcional) chave do Google AI Studio para a conversa da chamada
+#   segredo OLLAMA_API_KEY: (opcional) chave do Ollama Cloud, reserva da IA da conversa
 # Na primeira vez o projeto do Apps Script é criado sozinho e o .clasp.json volta para o repositório.
 name: Apps Script
 
@@ -41,6 +42,7 @@ jobs:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
           PLANILHA_ID: ${{ secrets.PLANILHA_ID }}
           IA_CHAVE: ${{ secrets.IA_CHAVE }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
         run: |
           for s in CLASPRC_JSON PLANILHA_ID; do
             if [ -z "${!s}" ]; then echo "::error::Falta o segredo $s (veja docs/INSTALACAO.md)."; exit 1; fi
@@ -51,6 +53,7 @@ jobs:
             const id = process.env.PLANILHA_ID.trim().replace(/^.*\/d\/([^/]+).*$/, "$1");
             const s = { planilhaId: id };
             if (process.env.IA_CHAVE && process.env.IA_CHAVE.trim()) s.iaChave = process.env.IA_CHAVE.trim();
+            if (process.env.OLLAMA_API_KEY && process.env.OLLAMA_API_KEY.trim()) s.ollamaChave = process.env.OLLAMA_API_KEY.trim();
             require("fs").writeFileSync("src/00_Segredos.gs", "var SEGREDOS = " + JSON.stringify(s) + ";\n");
           '
       - name: Criar o projeto do Apps Script (só na primeira vez)

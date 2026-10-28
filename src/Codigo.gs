@@ -244,7 +244,7 @@ function apiInicio() {
     habitos: h.habitos,
     ativos: h.ativos,
     hora: faixaDe_(Utilities.formatDate(new Date(), tz, 'HH:mm')),
-    ia: !!iaChave_()
+    ia: !!(iaChave_() || ollamaChave_())
   };
 }
 
@@ -953,6 +953,12 @@ function iaChave_() {
   var segredos = (typeof SEGREDOS !== 'undefined' && SEGREDOS) ? SEGREDOS : {};
   return segredos.iaChave || PropertiesService.getScriptProperties().getProperty('IA_CHAVE') || '';
 }
+// Reserva: Ollama Cloud (segredo OLLAMA_API_KEY), usado quando o Gemini está ocupado ou fora do ar.
+var OLLAMA_MODELO = 'gpt-oss:20b';
+function ollamaChave_() {
+  var segredos = (typeof SEGREDOS !== 'undefined' && SEGREDOS) ? SEGREDOS : {};
+  return segredos.ollamaChave || PropertiesService.getScriptProperties().getProperty('OLLAMA_API_KEY') || '';
+}
 
 // Rode uma vez no editor do Apps Script para autorizar o acesso à internet (a IA), depois de colocar a chave.
 function autorizarIA() {
@@ -981,8 +987,8 @@ function promptConversa_(pessoa, faixa, categorias) {
 }
 
 function apiConversar(pedido) {
-  var chave = iaChave_();
-  if (!chave) throw new Error('A IA da conversa não está configurada (falta o segredo IA_CHAVE).');
+  var chave = iaChave_(), reserva = ollamaChave_();
+  if (!chave && !reserva) throw new Error('A IA da conversa não está configurada (falta o segredo IA_CHAVE ou OLLAMA_API_KEY).');
   pedido = pedido || {};
   var ss = abrir_(config_());
   var l = listas_(ss);
@@ -1015,7 +1021,7 @@ function apiConversar(pedido) {
     }
   };
   var ultimoErro = '';
-  for (var i = 0; i < IA_MODELOS.length; i++) {
+  for (var i = 0; chave && i < IA_MODELOS.length; i++) {
     var resp = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + IA_MODELOS[i] + ':generateContent', {
       method: 'post', contentType: 'application/json', muteHttpExceptions: true,
       headers: { 'x-goog-api-key': chave }, payload: JSON.stringify(corpo)
@@ -1026,6 +1032,19 @@ function apiConversar(pedido) {
       var texto = dados.candidates[0].content.parts.map(function (p) { return p.text || ''; }).join('');
       return limparRespostaIA_(JSON.parse(texto), l.categorias);
     } catch (e) { ultimoErro = 'resposta estranha: ' + e.message; }
+  }
+  if (reserva) {
+    var mensagens = [{ role: 'system', content: corpo.systemInstruction.parts[0].text + '\nResponda só com um JSON: {"fala": texto, "acao": perguntar|confirmar|gravar|nada|desistir, "linhas": [{"categoria", "testados", "finalizados", "defeitos"}]}.' }]
+      .concat(contents.map(function (c) { return { role: c.role === 'model' ? 'assistant' : 'user', content: c.parts[0].text }; }));
+    var r2 = UrlFetchApp.fetch('https://ollama.com/api/chat', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { Authorization: 'Bearer ' + reserva },
+      payload: JSON.stringify({ model: OLLAMA_MODELO, messages: mensagens, stream: false, format: 'json', options: { temperature: 0.3 } })
+    });
+    if (r2.getResponseCode() === 200) {
+      try { return limparRespostaIA_(JSON.parse(JSON.parse(r2.getContentText()).message.content), l.categorias); }
+      catch (e) { ultimoErro = 'Ollama: resposta estranha: ' + e.message; }
+    } else ultimoErro = 'Ollama ' + r2.getResponseCode() + ' ' + String(r2.getContentText()).slice(0, 200);
   }
   throw new Error('A IA não respondeu (' + ultimoErro + ').');
 }

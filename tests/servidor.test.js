@@ -356,3 +356,23 @@ test('conversa com a IA: manda o histórico, aceita só categorias da planilha',
   assert.strictEqual(r.acao, 'perguntar', 'categoria fora da planilha não grava');
   assert.match(r.fala, /GELADEIRA/);
 });
+
+test('conversa com a IA: Ollama Cloud é a reserva quando o Gemini falha', () => {
+  const s = carregarServidor(planilha());
+  s.SEGREDOS.ollamaChave = 'ollama-teste';
+  assert.strictEqual(s.apiInicio().ia, true, 'só com a chave do Ollama também conversa');
+  s.SEGREDOS.iaChave = 'gemini-teste';
+  const urls = [];
+  s.UrlFetchApp = { fetch: (url, o) => {
+    urls.push(url);
+    if (/googleapis/.test(url)) return { getResponseCode: () => 429, getContentText: () => 'cota' };
+    assert.strictEqual(o.headers.Authorization, 'Bearer ollama-teste');
+    const p = JSON.parse(o.payload);
+    assert.strictEqual(p.messages[0].role, 'system');
+    assert.strictEqual(p.messages[p.messages.length - 1].content, '2 caixas de som testadas');
+    return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ message: { content: JSON.stringify({ fala: 'Duas caixas de som testadas, certo?', acao: 'confirmar', linhas: [{ categoria: 'caixa de som', testados: 2 }] }) } }) };
+  } };
+  const r = JSON.parse(JSON.stringify(s.apiConversar({ pessoa: 'DANIEL VARGAS', hora: 9, historico: [{ quem: 'pessoa', texto: '2 caixas de som testadas' }] })));
+  assert.strictEqual(urls.length, 4, '3 modelos do Gemini e depois o Ollama');
+  assert.deepStrictEqual(r.linhas, [{ categoria: 'CAIXA DE SOM', testados: 2, finalizados: 0, defeitos: 0 }]);
+});
