@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.14.0';
+var VERSAO = '1.15.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -243,7 +243,8 @@ function apiInicio() {
     maximos: maximos_(ss),
     habitos: h.habitos,
     ativos: h.ativos,
-    hora: faixaDe_(Utilities.formatDate(new Date(), tz, 'HH:mm'))
+    hora: faixaDe_(Utilities.formatDate(new Date(), tz, 'HH:mm')),
+    ia: !!(iaChave_() || ollamaChave_())
   };
 }
 
@@ -722,7 +723,8 @@ function apiAnunciar(aparelho, texto) {
   return { agora: Date.now(), anuncio: anuncio };
 }
 
-function apiAnuncio() {
+function apiAnuncio(aparelho, ouvindo) {
+  if (aparelho && ouvindo) marcarOuvinte_(String(aparelho));
   var bruto = CacheService.getScriptCache().get('anuncio');
   return { agora: Date.now(), anuncio: bruto ? JSON.parse(bruto) : null, versao: VERSAO };
 }
@@ -817,6 +819,20 @@ function apiDesfazer(id) {
 // Lista da vez da chamada: o primeiro computador a pedir lê a planilha e guarda; os outros recebem a mesma lista,
 // para todos falarem os mesmos nomes no mesmo instante. A chave é o instante da fala (igual em todos).
 function apiListaDaVez(hora, instante) {
+  var r = listaDaVez_(hora, instante);
+  // Alguém respondendo pelo microfone: os computadores esperam a conversa acabar antes de chamar (lido na hora, não guardado).
+  r.conversaAte = Number(CacheService.getScriptCache().get('conversa')) || 0;
+  return r;
+}
+// Um computador ouviu uma resposta e vai confirmar: ninguém começa a chamar até esse instante (relógio do servidor).
+function apiConversa(ate) {
+  var cache = CacheService.getScriptCache();
+  var fim = Math.min(Number(ate) || 0, Date.now() + 60000);
+  var atual = Number(cache.get('conversa')) || 0;
+  if (fim > atual) cache.put('conversa', String(Math.round(fim)), 120);
+  return { ok: true };
+}
+function listaDaVez_(hora, instante) {
   var cache = CacheService.getScriptCache();
   var chave = 'vez_' + Math.floor(Number(hora)) + '_' + Math.round(Number(instante) / 1000);
   var pronta = cache.get(chave);
@@ -832,4 +848,223 @@ function apiListaDaVez(hora, instante) {
   } finally {
     trava.releaseLock();
   }
+}
+
+// ---------- Chamada com conversa (um de cada vez) ----------
+// Quando algum computador está ouvindo pelo microfone, a chamada vira conversa: todos os computadores chamam juntos
+// uma pessoa; o primeiro computador que ouve a pessoa responder "pega a vez" e conversa com ela; os outros ficam quietos.
+// Terminou (ou ninguém respondeu em 2 minutos), todos chamam a próxima. O estado fica no cache do servidor.
+var ESPERA_VEZ = 120000;
+function vezChave_(hora) { return 'vezEstado_' + Math.floor(Number(hora)); }
+function lerVez_(hora) { var t = CacheService.getScriptCache().get(vezChave_(hora)); return t ? JSON.parse(t) : null; }
+function guardarVez_(hora, e) { CacheService.getScriptCache().put(vezChave_(hora), JSON.stringify(e), 21600); }
+function segundoCheio_(ms) { return Math.ceil(ms / 1000) * 1000; }
+function comTrava_(f) {
+  var trava = LockService.getScriptLock();
+  trava.waitLock(20000);
+  try { return f(); } finally { trava.releaseLock(); }
+}
+
+// Computadores com "Ouvir as respostas" ligado avisam a cada 30 s (apiAnuncio).
+function marcarOuvinte_(aparelho) {
+  var cache = CacheService.getScriptCache();
+  var l = JSON.parse(cache.get('ouvintes') || '{}');
+  l[aparelho] = Date.now();
+  cache.put('ouvintes', JSON.stringify(l), 600);
+}
+function temOuvinte_() {
+  var l = JSON.parse(CacheService.getScriptCache().get('ouvintes') || '{}');
+  return Object.keys(l).some(function (k) { return Date.now() - l[k] < 150000; });
+}
+
+// Passa para a próxima pessoa: quem acabou de ser chamada e não respondeu vai para o fim da fila.
+function avancarVez_(hora, e, agora) {
+  var faltam = apiChamada(hora, agora).faltam;
+  var antes = e.fila.filter(function (n) { return faltam.indexOf(n) >= 0; });
+  var atual = e.pessoa;
+  antes = antes.filter(function (n) { return n !== atual; });
+  if (atual && faltam.indexOf(atual) >= 0) { antes.push(atual); e.tentativas[atual] = (e.tentativas[atual] || 0) + 1; }
+  faltam.forEach(function (n) { if (antes.indexOf(n) < 0) antes.push(n); });
+  e.fila = antes;
+  e.pessoa = antes[0] || null;
+  // Chegou no fim da lista e voltou ao começo (a próxima já foi chamada nesta volta): os computadores falam
+  // a lista de quem ainda falta antes de chamar.
+  e.anunciar = false;
+  if (e.pessoa && (e.tentativas[e.pessoa] || 0) > (e.volta || 0)) { e.volta = (e.volta || 0) + 1; e.anunciar = true; }
+  e.falarEm = segundoCheio_(agora + 3000);
+  e.ate = e.falarEm + ESPERA_VEZ;
+  e.dono = null;
+  e.n = (e.n || 0) + 1;
+  return e;
+}
+
+// Começo da chamada (todos os computadores pedem no mesmo instante; o primeiro monta a fila).
+function apiComecarVez(hora, inicio) {
+  return comTrava_(function () {
+    var e = lerVez_(hora);
+    if (e && e.inicio === Number(inicio)) return e;
+    var r = apiChamada(hora, inicio);
+    e = { inicio: Number(inicio), conversa: temOuvinte_(), fila: r.faltam, tentativas: {}, pessoa: r.faltam[0] || null,
+      falarEm: Number(inicio), ate: Number(inicio) + ESPERA_VEZ, dono: null, n: 0, volta: 0, anunciar: false };
+    guardarVez_(hora, e);
+    return e;
+  });
+}
+
+// Como está a vez agora. Passou o tempo sem ninguém pegar (ou o computador que pegou sumiu): próxima pessoa.
+function apiVez(hora) {
+  var e = lerVez_(hora);
+  if (!e || !e.pessoa || Date.now() <= e.ate) return e;
+  return comTrava_(function () {
+    var x = lerVez_(hora);
+    if (x && x.pessoa && Date.now() > x.ate) { avancarVez_(hora, x, Date.now()); guardarVez_(hora, x); }
+    return x;
+  });
+}
+
+// O computador que ouviu a pessoa pega a vez (só um).
+function apiPegarVez(hora, falarEm, aparelho) {
+  return comTrava_(function () {
+    var e = lerVez_(hora);
+    if (!e || e.falarEm !== Number(falarEm) || (e.dono && e.dono !== aparelho)) return { ok: false, vez: e };
+    e.dono = aparelho;
+    e.ate = Date.now() + 120000;
+    guardarVez_(hora, e);
+    return { ok: true, vez: e };
+  });
+}
+
+// Conversa terminada (gravou, nada, ou desistiu): todos chamam a próxima. Um botão na tela também termina a vez.
+function apiFimDaVez(hora, falarEm, aparelho) {
+  return comTrava_(function () {
+    var e = lerVez_(hora);
+    if (!e || e.falarEm !== Number(falarEm) || (e.dono && aparelho && e.dono !== aparelho)) return e;
+    avancarVez_(hora, e, Date.now());
+    guardarVez_(hora, e);
+    return e;
+  });
+}
+
+
+// ---------- IA da conversa (Gemini, plano gratuito do Google AI Studio) ----------
+// A chave vem do segredo IA_CHAVE do GitHub (ou da propriedade IA_CHAVE do script). Sem chave, a conversa usa só as regras do app.
+var IA_MODELOS = ['gemini-3.1-flash-lite-preview', 'gemini-flash-lite-latest', 'gemini-flash-latest'];
+function iaChave_() {
+  var segredos = (typeof SEGREDOS !== 'undefined' && SEGREDOS) ? SEGREDOS : {};
+  return segredos.iaChave || PropertiesService.getScriptProperties().getProperty('IA_CHAVE') || '';
+}
+// Reserva: Ollama Cloud (segredo OLLAMA_API_KEY), usado quando o Gemini está ocupado ou fora do ar.
+var OLLAMA_MODELO = 'gpt-oss:20b';
+function ollamaChave_() {
+  var segredos = (typeof SEGREDOS !== 'undefined' && SEGREDOS) ? SEGREDOS : {};
+  return segredos.ollamaChave || PropertiesService.getScriptProperties().getProperty('OLLAMA_API_KEY') || '';
+}
+
+// Rode uma vez no editor do Apps Script para autorizar o acesso à internet (a IA), depois de colocar a chave.
+function autorizarIA() {
+  var r = apiConversar({ pessoa: 'TESTE', hora: 9, historico: [{ quem: 'pessoa', texto: 'é... hum... fiz 3 notebooks finalizados' }] });
+  Logger.log(JSON.stringify(r));
+  return r;
+}
+
+function promptConversa_(pessoa, faixa, categorias) {
+  return [
+    'Você é a voz da chamada de produção de uma equipe de assistência técnica. Está conversando por voz, num computador da sala, com '
+      + pessoa + ' sobre a produção da faixa ' + faixa + '.',
+    'O texto da pessoa vem de um ditado automático: pode ter erros de reconhecimento, vícios de linguagem (é, hum, tipo, né, então), pausas, '
+      + 'repetições, frases cortadas e correções ("3, não, 4"). Entenda a intenção e use sempre o último valor corrigido.',
+    'Objetivo: saber, para cada categoria de produto, quantos ela testou, finalizou e quantos deram defeito nesta faixa.',
+    'Use só categorias desta lista, escolhendo a mais parecida com o que foi dito (plural, apelido ou erro de ditado contam); '
+      + 'se não der para saber qual, pergunte: ' + categorias.join(', ') + '.',
+    'Se só disser a quantidade sem dizer se foi testado ou finalizado, pergunte. Se a pessoa esquecer, ajude com perguntas curtas, uma de cada vez.',
+    'Fale em português do Brasil, com frases curtas e naturais, porque a resposta é lida em voz alta: sem emojis, sem listas, sem markdown. '
+      + 'Chame a pessoa pelo primeiro nome.',
+    'Quando tiver a produção, repita tudo resumido e pergunte se está certo (acao "confirmar", com as linhas).',
+    'Só use acao "gravar" quando a pessoa confirmar o resumo que você acabou de fazer; repita as mesmas linhas e fale algo curto como "Perfeito, enviando."',
+    'Se ela disser que não fez nada nesta faixa, confirme; quando confirmar, use acao "nada". Se ela pedir para parar, use acao "desistir".',
+    'Nunca invente números. Responda só o JSON pedido.'
+  ].join('\n');
+}
+
+function apiConversar(pedido) {
+  var chave = iaChave_(), reserva = ollamaChave_();
+  if (!chave && !reserva) throw new Error('A IA da conversa não está configurada (falta o segredo IA_CHAVE ou OLLAMA_API_KEY).');
+  pedido = pedido || {};
+  var ss = abrir_(config_());
+  var l = listas_(ss);
+  var f = faixa_(pedido.hora);
+  var nome = String(pedido.pessoa || '').split(/\s+/)[0];
+  nome = nome.charAt(0) + nome.slice(1).toLowerCase();
+  var contents = (pedido.historico || []).slice(-20).map(function (m) {
+    return { role: m.quem === 'ia' ? 'model' : 'user', parts: [{ text: String(m.texto || '').slice(0, 800) }] };
+  });
+  // A conversa tem de começar com a pessoa.
+  while (contents.length && contents[0].role === 'model') contents.shift();
+  if (!contents.length) contents = [{ role: 'user', parts: [{ text: 'sou eu' }] }];
+  var corpo = {
+    systemInstruction: { parts: [{ text: promptConversa_(nome, f.inicio + ' às ' + f.fim, l.categorias) }] },
+    contents: contents,
+    generationConfig: {
+      temperature: 0.3,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          fala: { type: 'STRING' },
+          acao: { type: 'STRING', enum: ['perguntar', 'confirmar', 'gravar', 'nada', 'desistir'] },
+          linhas: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
+            categoria: { type: 'STRING' }, testados: { type: 'INTEGER' }, finalizados: { type: 'INTEGER' }, defeitos: { type: 'INTEGER' }
+          }, required: ['categoria'] } }
+        },
+        required: ['fala', 'acao']
+      }
+    }
+  };
+  var ultimoErro = '';
+  for (var i = 0; chave && i < IA_MODELOS.length; i++) {
+    var resp = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + IA_MODELOS[i] + ':generateContent', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { 'x-goog-api-key': chave }, payload: JSON.stringify(corpo)
+    });
+    if (resp.getResponseCode() !== 200) { ultimoErro = resp.getResponseCode() + ' ' + String(resp.getContentText()).slice(0, 200); continue; }
+    try {
+      var dados = JSON.parse(resp.getContentText());
+      var texto = dados.candidates[0].content.parts.map(function (p) { return p.text || ''; }).join('');
+      return limparRespostaIA_(JSON.parse(texto), l.categorias);
+    } catch (e) { ultimoErro = 'resposta estranha: ' + e.message; }
+  }
+  if (reserva) {
+    var mensagens = [{ role: 'system', content: corpo.systemInstruction.parts[0].text + '\nResponda só com um JSON: {"fala": texto, "acao": perguntar|confirmar|gravar|nada|desistir, "linhas": [{"categoria", "testados", "finalizados", "defeitos"}]}.' }]
+      .concat(contents.map(function (c) { return { role: c.role === 'model' ? 'assistant' : 'user', content: c.parts[0].text }; }));
+    var r2 = UrlFetchApp.fetch('https://ollama.com/api/chat', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { Authorization: 'Bearer ' + reserva },
+      payload: JSON.stringify({ model: OLLAMA_MODELO, messages: mensagens, stream: false, format: 'json', options: { temperature: 0.3 } })
+    });
+    if (r2.getResponseCode() === 200) {
+      try { return limparRespostaIA_(JSON.parse(JSON.parse(r2.getContentText()).message.content), l.categorias); }
+      catch (e) { ultimoErro = 'Ollama: resposta estranha: ' + e.message; }
+    } else ultimoErro = 'Ollama ' + r2.getResponseCode() + ' ' + String(r2.getContentText()).slice(0, 200);
+  }
+  throw new Error('A IA não respondeu (' + ultimoErro + ').');
+}
+
+// Só categorias da planilha e quantidades inteiras; categoria desconhecida vira pergunta.
+function limparRespostaIA_(r, categorias) {
+  var oficial = {};
+  categorias.forEach(function (c) { oficial[semAcento_(c)] = c; });
+  var acao = ['perguntar', 'confirmar', 'gravar', 'nada', 'desistir'].indexOf(r.acao) >= 0 ? r.acao : 'perguntar';
+  var desconhecida = '';
+  var linhas = (r.linhas || []).map(function (x) {
+    var c = oficial[semAcento_(x.categoria)];
+    if (!c) desconhecida = x.categoria;
+    var n = function (v) { v = Math.round(Number(v) || 0); return v > 0 && v < 1000 ? v : 0; };
+    return { categoria: c || '', testados: n(x.testados), finalizados: n(x.finalizados), defeitos: n(x.defeitos) };
+  }).filter(function (x) { return x.categoria && x.testados + x.finalizados + x.defeitos > 0; });
+  var fala = String(r.fala || '').replace(/[*_#`]/g, '').trim();
+  if (desconhecida && (acao === 'gravar' || acao === 'confirmar')) {
+    return { fala: 'Não achei a categoria ' + desconhecida + ' na planilha. Qual é o produto?', acao: 'perguntar', linhas: [] };
+  }
+  if ((acao === 'gravar' || acao === 'confirmar') && !linhas.length) acao = 'perguntar';
+  return { fala: fala || 'Pode repetir?', acao: acao, linhas: linhas };
 }

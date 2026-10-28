@@ -195,6 +195,12 @@ test('chamada chama só quem trabalha naquela hora (costume ou aba Horários), s
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiListaDaVez(14, 1761665405200))).faltam, vez1.faltam, 'mesma lista no mesmo instante');
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiListaDaVez(14, 1761665525000))).faltam, [], 'instante novo lê de novo');
   reg.pop();
+  // Conversa pelo microfone: a lista da vez avisa até quando esperar.
+  assert.strictEqual(s.apiListaDaVez(14, 1761665999000).conversaAte, 0);
+  const ate = Date.now() + 15000;
+  s.apiConversa(ate);
+  s.apiConversa(ate - 5000);
+  assert.strictEqual(s.apiListaDaVez(14, 1761665999000).conversaAte, ate, 'fica o maior');
 
   const hor = p.getSheetByName('Horários').dados;
   hor.push(['julia gomes', '10:00', '12:00']);
@@ -291,4 +297,82 @@ test('vários aparelhos: "não respondeu" da mesma pessoa e faixa entra uma vez 
   s.apiResposta({ pessoa: 'JULIA GOMES', hora: 9, resposta: 'não respondeu' });
   const linhas = p.getSheetByName('Chamada').dados.slice(1).filter((r) => r[4] === 'não respondeu');
   assert.strictEqual(linhas.length, 1);
+});
+
+test('chamada com conversa: um de cada vez, só um computador pega a vez, quem não responde vai para o fim', () => {
+  const s = carregarServidor(planilha());
+  let faltam = ['ANA LEAL', 'DANIEL VARGAS', 'JULIA GOMES'];
+  s.apiChamada = () => ({ faixa: 'x', faltam: faltam.slice(), feitos: [], nada: [], naoVieram: [], faltas: [] });
+  // Sem computador ouvindo: chamada de todos os nomes, sem conversa.
+  assert.strictEqual(s.apiComecarVez(14, 1000).conversa, false);
+  s.apiAnuncio('PC1', true);
+  let e = s.apiComecarVez(14, 5000);
+  assert.strictEqual(e.conversa, true);
+  assert.strictEqual(e.pessoa, 'ANA LEAL');
+  assert.strictEqual(s.apiComecarVez(14, 5000).pessoa, 'ANA LEAL', 'o mesmo começo para todos');
+  assert.strictEqual(s.apiPegarVez(14, 5000, 'PC1').ok, true);
+  assert.strictEqual(s.apiPegarVez(14, 5000, 'PC2').ok, false, 'só um computador conversa');
+  assert.strictEqual(s.apiFimDaVez(14, 5000, 'PC2').pessoa, 'ANA LEAL', 'outro computador não encerra a vez');
+  faltam = ['DANIEL VARGAS', 'JULIA GOMES'];
+  e = s.apiFimDaVez(14, 5000, 'PC1');
+  assert.strictEqual(e.pessoa, 'DANIEL VARGAS');
+  assert.strictEqual(e.anunciar, false);
+  // Daniel não responde: vai para o fim; Julia é a próxima; depois volta ao começo e anuncia a lista.
+  e = s.apiFimDaVez(14, e.falarEm, '');
+  assert.strictEqual(e.pessoa, 'JULIA GOMES');
+  e = s.apiFimDaVez(14, e.falarEm, '');
+  assert.strictEqual(e.pessoa, 'DANIEL VARGAS');
+  assert.strictEqual(e.anunciar, true, 'voltou ao começo da lista');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(e.fila)), ['DANIEL VARGAS', 'JULIA GOMES']);
+  faltam = [];
+  e = s.apiFimDaVez(14, e.falarEm, '');
+  assert.strictEqual(e.pessoa, null, 'todos responderam');
+});
+
+test('conversa com a IA: manda o histórico, aceita só categorias da planilha', () => {
+  const s = carregarServidor(planilha());
+  assert.strictEqual(s.apiInicio().ia, false);
+  assert.throws(() => s.apiConversar({ pessoa: 'ANA LEAL', hora: 9, historico: [] }), /IA_CHAVE/);
+  s.SEGREDOS.iaChave = 'chave-teste';
+  assert.strictEqual(s.apiInicio().ia, true);
+  let enviado = null, resposta = { fala: 'Ana, 3 notebooks finalizados. Está certo?', acao: 'confirmar', linhas: [{ categoria: 'notebook', finalizados: 3 }] };
+  const modelos = [];
+  s.UrlFetchApp = { fetch: (url, o) => {
+    modelos.push(url.match(/models\/([^:]+)/)[1]);
+    if (modelos.length === 1) return { getResponseCode: () => 503, getContentText: () => 'ocupado' };
+    enviado = JSON.parse(o.payload);
+    assert.strictEqual(o.headers['x-goog-api-key'], 'chave-teste');
+    return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(resposta) }] } }] }) };
+  } };
+  let r = JSON.parse(JSON.stringify(s.apiConversar({ pessoa: 'ANA LEAL', hora: 9, historico: [
+    { quem: 'ia', texto: 'Ana Leal, venha lançar' }, { quem: 'pessoa', texto: 'é... hum... 3 notebook finalizado' }] })));
+  assert.strictEqual(modelos.length, 2, 'modelo ocupado: tenta o próximo');
+  assert.deepStrictEqual(r, { fala: 'Ana, 3 notebooks finalizados. Está certo?', acao: 'confirmar', linhas: [{ categoria: 'NOTEBOOK', testados: 0, finalizados: 3, defeitos: 0 }] });
+  assert.strictEqual(enviado.contents[0].role, 'user', 'começa pela pessoa');
+  assert.match(enviado.systemInstruction.parts[0].text, /CAIXA DE SOM/);
+  assert.match(enviado.systemInstruction.parts[0].text, /Ana/);
+  resposta = { fala: 'Perfeito, enviando.', acao: 'gravar', linhas: [{ categoria: 'GELADEIRA', finalizados: 3 }] };
+  r = s.apiConversar({ pessoa: 'ANA LEAL', hora: 9, historico: [{ quem: 'pessoa', texto: 'sim' }] });
+  assert.strictEqual(r.acao, 'perguntar', 'categoria fora da planilha não grava');
+  assert.match(r.fala, /GELADEIRA/);
+});
+
+test('conversa com a IA: Ollama Cloud é a reserva quando o Gemini falha', () => {
+  const s = carregarServidor(planilha());
+  s.SEGREDOS.ollamaChave = 'ollama-teste';
+  assert.strictEqual(s.apiInicio().ia, true, 'só com a chave do Ollama também conversa');
+  s.SEGREDOS.iaChave = 'gemini-teste';
+  const urls = [];
+  s.UrlFetchApp = { fetch: (url, o) => {
+    urls.push(url);
+    if (/googleapis/.test(url)) return { getResponseCode: () => 429, getContentText: () => 'cota' };
+    assert.strictEqual(o.headers.Authorization, 'Bearer ollama-teste');
+    const p = JSON.parse(o.payload);
+    assert.strictEqual(p.messages[0].role, 'system');
+    assert.strictEqual(p.messages[p.messages.length - 1].content, '2 caixas de som testadas');
+    return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ message: { content: JSON.stringify({ fala: 'Duas caixas de som testadas, certo?', acao: 'confirmar', linhas: [{ categoria: 'caixa de som', testados: 2 }] }) } }) };
+  } };
+  const r = JSON.parse(JSON.stringify(s.apiConversar({ pessoa: 'DANIEL VARGAS', hora: 9, historico: [{ quem: 'pessoa', texto: '2 caixas de som testadas' }] })));
+  assert.strictEqual(urls.length, 4, '3 modelos do Gemini e depois o Ollama');
+  assert.deepStrictEqual(r.linhas, [{ categoria: 'CAIXA DE SOM', testados: 2, finalizados: 0, defeitos: 0 }]);
 });
