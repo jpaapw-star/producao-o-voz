@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.10.0';
+var VERSAO = '1.10.1';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -239,7 +239,6 @@ function apiInicio() {
     apelidos: apelidos_(ss, l),
     comHorario: Object.keys(horarios_(ss, l)).length,
     agenda: agenda_(ss),
-    vozNatural: !!chaveVoz_(),
     supervisores: l.supervisores,
     maximos: maximos_(ss),
     habitos: h.habitos,
@@ -479,7 +478,7 @@ function horarios_(ss, l) {
   return mapa;
 }
 
-// Agenda da chamada (aba opcional): uma hora por linha na coluna A. Vazia = chama aos 50 minutos de cada hora.
+// Agenda da chamada (aba opcional): uma hora por linha na coluna A. Vazia = chama aos 30 minutos de cada hora, das 07:30 em diante.
 // Devolve as horas em "HH:MM", em ordem e sem repetir.
 function horaAgenda_(v) {
   var m = String(v).match(/^\s*(\d{1,2})\s*(?:[:h]\s*(\d{2}))?/);
@@ -496,10 +495,10 @@ function agenda_(ss) {
   });
   return lista.sort();
 }
-// Faixa que a chamada de um horário cobra: da hora em curso a partir dos 30 minutos; antes disso, a hora anterior.
+// Faixa que a chamada de um horário cobra: a hora que acabou (08:30 cobra 07:00 – 08:00); dos 45 minutos em diante, a hora em curso.
 function faixaDaAgenda_(h) {
   var hora = Number(h.slice(0, 2)), min = Number(h.slice(3));
-  var x = min >= 30 ? hora : (hora + 23) % 24;
+  var x = min >= 45 ? hora : (hora + 23) % 24;
   return ('0' + x).slice(-2) + ':00 – ' + ('0' + (x + 1) % 24).slice(-2) + ':00';
 }
 
@@ -658,110 +657,6 @@ function apiAnunciar(aparelho, texto) {
   var anuncio = { id: aparelho + '-' + agora, de: String(aparelho), texto: String(texto).slice(0, 300), falarEm: agora + 3000 };
   CacheService.getScriptCache().put('anuncio', JSON.stringify(anuncio), 600);
   return { agora: Date.now(), anuncio: anuncio };
-}
-
-// Voz natural do Google (Chirp 3 HD). A chave fica no segredo TTS_CHAVE do GitHub; sem ela, os aparelhos usam a voz deles.
-var VOZES_NATURAIS = ['Aoede', 'Kore', 'Leda', 'Zephyr', 'Charon', 'Fenrir', 'Orus', 'Puck'];
-function chaveVoz_() {
-  var segredos = (typeof SEGREDOS !== 'undefined' && SEGREDOS) ? SEGREDOS : {};
-  return segredos.ttsChave || PropertiesService.getScriptProperties().getProperty('TTS_CHAVE') || '';
-}
-
-// Devolve o áudio da frase pronto para tocar ("data:audio/...;base64,..."). A mesma frase com a mesma voz fica guardada 6 horas
-// (não gasta cota de novo). A chave pode ser do Google Cloud (Chirp 3 HD) ou do AI Studio (voz do Gemini, grátis com limite por dia):
-// tenta a Chirp; se a chave não tiver acesso a ela, usa a do Gemini.
-function apiVoz(texto, voz) {
-  var chave = chaveVoz_();
-  if (!chave) throw new Error('A voz natural ainda não foi ligada (falta a chave).');
-  texto = String(texto || '').slice(0, 300);
-  if (VOZES_NATURAIS.indexOf(voz) < 0) voz = VOZES_NATURAIS[0];
-  var cache = CacheService.getScriptCache();
-  var id = 'voz-' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, voz + '|' + texto, Utilities.Charset.UTF_8));
-  var guardado = lerGrande_(cache, id);
-  if (guardado) return guardado;
-  var audio = null;
-  if (cache.get('voz-modo') !== 'gemini') {
-    var r = vozCloud_(chave, texto, voz);
-    if (r.audio) audio = 'data:audio/mpeg;base64,' + r.audio;
-    else if (r.codigo === 403 || /API_KEY_SERVICE_BLOCKED|SERVICE_DISABLED|PERMISSION_DENIED|billing/i.test(r.erro)) cache.put('voz-modo', 'gemini', 21600);
-    else throw new Error('Voz natural indisponível: ' + r.erro);
-  }
-  if (!audio) {
-    if (cache.get('voz-gemini-cheio')) throw new Error('Voz natural: limite do dia do Gemini atingido.');
-    audio = vozGemini_(chave, texto, voz, cache);
-  }
-  guardarGrande_(cache, id, audio, 21600);
-  return audio;
-}
-
-function vozCloud_(chave, texto, voz) {
-  var r = UrlFetchApp.fetch('https://texttospeech.googleapis.com/v1/text:synthesize?key=' + encodeURIComponent(chave), {
-    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    payload: JSON.stringify({ input: { text: texto }, voice: { languageCode: 'pt-BR', name: 'pt-BR-Chirp3-HD-' + voz },
-      audioConfig: { audioEncoding: 'MP3' } })
-  });
-  var corpo = JSON.parse(r.getContentText() || '{}');
-  var erro = corpo.error ? JSON.stringify(corpo.error) : 'erro ' + r.getResponseCode();
-  return { codigo: r.getResponseCode(), audio: r.getResponseCode() === 200 ? corpo.audioContent : null, erro: erro };
-}
-
-// Voz do Gemini (chave do AI Studio): acha sozinho o modelo de voz ("tts") disponível e devolve WAV.
-function vozGemini_(chave, texto, voz, cache) {
-  var base = 'https://generativelanguage.googleapis.com/v1beta/';
-  var modelo = cache.get('voz-modelo');
-  if (!modelo) {
-    var lista = JSON.parse(UrlFetchApp.fetch(base + 'models?pageSize=1000&key=' + encodeURIComponent(chave), { muteHttpExceptions: true }).getContentText() || '{}');
-    var tts = (lista.models || []).filter(function (m) {
-      return /tts/i.test(m.name) && (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0;
-    }).map(function (m) { return m.name; });
-    tts.sort(function (x, y) { return (/flash/.test(y) - /flash/.test(x)) || (/preview/.test(x) - /preview/.test(y)) || (y > x ? 1 : -1); });
-    modelo = tts[0];
-    if (!modelo) throw new Error('Voz natural indisponível: a chave não tem acesso a um modelo de voz do Gemini.');
-    cache.put('voz-modelo', modelo, 21600);
-  }
-  var r = UrlFetchApp.fetch(base + modelo + ':generateContent?key=' + encodeURIComponent(chave), {
-    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    payload: JSON.stringify({ contents: [{ parts: [{ text: texto }] }],
-      generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voz } } } } })
-  });
-  var corpo = JSON.parse(r.getContentText() || '{}');
-  if (r.getResponseCode() === 429) { cache.put('voz-gemini-cheio', '1', 1800); throw new Error('Voz natural: limite do Gemini atingido.'); }
-  if (r.getResponseCode() === 404) cache.remove('voz-modelo');
-  var parte = corpo.candidates && corpo.candidates[0] && corpo.candidates[0].content && (corpo.candidates[0].content.parts || [])[0];
-  var dados = parte && parte.inlineData;
-  if (r.getResponseCode() !== 200 || !dados || !dados.data) {
-    throw new Error('Voz natural indisponível: ' + ((corpo.error && corpo.error.message) || ('erro ' + r.getResponseCode())));
-  }
-  if (/wav|mpeg|mp3|ogg/i.test(dados.mimeType || '')) return 'data:' + dados.mimeType + ';base64,' + dados.data;
-  var taxa = Number((String(dados.mimeType).match(/rate=(\d+)/) || [])[1]) || 24000;
-  return 'data:audio/wav;base64,' + Utilities.base64Encode(wav_(Utilities.base64Decode(dados.data), taxa));
-}
-
-// PCM 16 bits mono -> WAV (cabeçalho de 44 bytes).
-function wav_(pcm, taxa) {
-  var cab = [], txt = function (t) { for (var i = 0; i < t.length; i++) cab.push(t.charCodeAt(i)); };
-  var num = function (n, b) { for (var i = 0; i < b; i++) cab.push((n >> (8 * i)) & 255); };
-  txt('RIFF'); num(36 + pcm.length, 4); txt('WAVE'); txt('fmt '); num(16, 4); num(1, 2); num(1, 2);
-  num(taxa, 4); num(taxa * 2, 4); num(2, 2); num(16, 2); txt('data'); num(pcm.length, 4);
-  return cab.map(function (b) { return b > 127 ? b - 256 : b; }).concat(pcm);
-}
-
-// O cache guarda no máximo 100 KB por item: áudio maior vai em pedaços.
-function guardarGrande_(cache, id, valor, segundos) {
-  var partes = {}, n = Math.ceil(valor.length / 90000);
-  if (n > 9) return;
-  for (var i = 0; i < n; i++) partes[id + '-' + i] = valor.slice(i * 90000, (i + 1) * 90000);
-  partes[id] = String(n);
-  cache.putAll(partes, segundos);
-}
-function lerGrande_(cache, id) {
-  var n = Number(cache.get(id));
-  if (!n) return null;
-  var chaves = [];
-  for (var i = 0; i < n; i++) chaves.push(id + '-' + i);
-  var achou = cache.getAll(chaves), out = '';
-  for (var j = 0; j < n; j++) { if (achou[chaves[j]] === undefined) return null; out += achou[chaves[j]]; }
-  return out;
 }
 
 function apiAnuncio() {

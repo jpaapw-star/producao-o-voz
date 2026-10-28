@@ -39,7 +39,6 @@ jobs:
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
           PLANILHA_ID: ${{ secrets.PLANILHA_ID }}
-          TTS_CHAVE: ${{ secrets.TTS_CHAVE }}
         run: |
           for s in CLASPRC_JSON PLANILHA_ID; do
             if [ -z "${!s}" ]; then echo "::error::Falta o segredo $s (veja docs/INSTALACAO.md)."; exit 1; fi
@@ -48,7 +47,7 @@ jobs:
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           node -e '
             const id = process.env.PLANILHA_ID.trim().replace(/^.*\/d\/([^/]+).*$/, "$1");
-            const s = { planilhaId: id, ttsChave: (process.env.TTS_CHAVE || "").trim() };
+            const s = { planilhaId: id };
             require("fs").writeFileSync("src/00_Segredos.gs", "var SEGREDOS = " + JSON.stringify(s) + ";\n");
           '
       - name: Criar o projeto do Apps Script (só na primeira vez)
