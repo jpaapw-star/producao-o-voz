@@ -29,7 +29,7 @@
     'teve tem tinha unidade unidades peca pecas item itens hoje hora agora ja so ponto virgula sendo que total ' +
     'ele ela eles elas la aqui depois tambem ok entao ai ate dele dela deles delas cada quantidade qtd ficou ficaram ' +
     'esta estao seu sua meu minha produziu produzi produção producao lancar lanca anota anotar coloca colocar bota botar ' +
-    'mais isso esse essa este esta outro outra outros outras ainda certo beleza blz por favor').split(' ');
+    'mais isso esse essa este esta outro outra outros outras ainda certo beleza blz por favor normal comum').split(' ');
   var NEUTRA = {};
   NEUTRAS.forEach(function (p) { NEUTRA[p] = true; });
 
@@ -133,7 +133,11 @@
     led: ['lede', 'ledi'], joystick: ['joistique', 'djoistick', 'joistick'], drone: ['droni', 'drones'], light: ['laite', 'laiti', 'lait'],
     ring: ['rin', 'ringue'], case: ['queise', 'queis', 'keise'], dock: ['doque', 'doqui'], controller: ['controle', 'controler', 'controla', 'controlar', 'controlador', 'control', 'contrôler'],
     joy: ['joi', 'djoi', 'djoy', 'joe', 'jo'], con: ['com', 'cao', 'cone', 'kon', 'conn'], joycon: ['joicon', 'joycom', 'joicom', 'joi com', 'joy com', 'djoicon'],
-    pro: ['pra', 'prol'], keyboard: ['teclado'],
+    pro: ['pra', 'prol'],
+    dualsense: ['dual sense', 'duol sense', 'dual cense', 'duolsense', 'dual sens', 'duo sense', 'dual sence', 'dualsens'],
+    dual: ['duol', 'duo', 'dual'], sense: ['sens', 'cense', 'sence', 'senso'], dualshock: ['dual shock', 'dual choque', 'duol choque', 'dualchoque', 'dual chock'],
+    shock: ['choque', 'chock', 'xoque'], edge: ['edje', 'edji', 'edge', 'edgi', 'eje'], raiju: ['raijo', 'raidju', 'raiu', 'raiju', 'raijú', 'raijou'],
+    elite: ['elaite', 'eleite', 'elit'], wireless: ['uaireles', 'uairless', 'sem fio'], keyboard: ['teclado'],
     microfone: ['microfoni', 'mic'], monitor: ['monitores'], printer: ['impressora'], scanner: ['escaner', 'escanner'], nobreak: ['no break', 'nobreique'],
     roteador: ['router', 'ruter', 'rauter'], fone: ['headphone', 'redfone', 'fones'], suporte: ['suport'], carregador: ['carregadores'],
     hd: ['aga de', 'agade'], ssd: ['esse esse de'], usb: ['u esse be', 'usbe'], hdmi: ['aga de eme i', 'agademei']
@@ -195,14 +199,25 @@
         if (n > 0 && seq.length > 1) apelidos.push({ tipo: 'cat', alvo: cat, seq: seq.slice(0, 1), completo: false });
       });
     });
-    // "controle de Nintendo/Switch" = Joy-Con ou Pro Controller (se a planilha não tiver "CONTROLE NINTENDO"); com mais de um, o app pergunta.
-    var deNintendo = categorias.filter(function (c) { return /joy|pro\s*contr/.test(normalizar(c)); });
-    var temControleNintendo = categorias.some(function (c) { var k = chaves(c); return k.indexOf(chave('controle')) >= 0 && (k.indexOf(chave('nintendo')) >= 0 || k.indexOf(chave('switch')) >= 0); });
-    if (deNintendo.length && !temControleNintendo) {
-      ['controle nintendo', 'controle switch', 'controle suite', 'controles nintendo', 'controle do nintendo', 'controle do switch', 'controle nintendu'].forEach(function (t) {
-        deNintendo.forEach(function (c) { apelidos.push({ tipo: 'cat', alvo: c, seq: chaves(t), completo: true }); });
+    // "controle de Nintendo / PlayStation / Xbox" = os controles daquela marca que a planilha tiver
+    // (Joy-Con, Pro Controller; DualSense, DualSense Edge, DualShock, Raiju; Xbox Elite...). Com mais de um, o app pergunta.
+    [
+      { marcas: ['nintendo', 'nintendu', 'switch', 'suite'], re: /joy|pro\s*contr/ },
+      { marcas: ['playstation', 'play', 'plei', 'ps5', 'ps4', 'pleisteichon', 'play station', 'pe esse cinco', 'pe esse quatro'], re: /dual|raiju|edge/ },
+      { marcas: ['xbox', 'xis box', 'x box', 'equis box'], re: /elite|xbox.*contr|contr.*xbox/ }
+    ].forEach(function (f) {
+      var alvos = categorias.filter(function (c) { return f.re.test(normalizar(c)); });
+      var jaTem = categorias.some(function (c) {
+        var k = chaves(c);
+        return k.indexOf(chave('controle')) >= 0 && f.marcas.some(function (m) { return k.indexOf(chave(m)) >= 0; });
       });
-    }
+      if (!alvos.length || jaTem) return;
+      f.marcas.forEach(function (m) {
+        ['controle ', 'controles ', 'controle do ', 'controle da '].forEach(function (pre) {
+          alvos.forEach(function (c) { apelidos.push({ tipo: 'cat', alvo: c, seq: chaves(pre + m), completo: true }); });
+        });
+      });
+    });
     // "jogos" e "console" = categoria de video game, se a planilha não tiver categoria própria com essas palavras.
     var games = categorias.filter(function (c) { return chaves(c).indexOf(chave('game')) >= 0; });
     var temJogo = categorias.some(function (c) { var k = chaves(c); return k.indexOf(chave('jogo')) >= 0 || k.indexOf(chave('console')) >= 0; });

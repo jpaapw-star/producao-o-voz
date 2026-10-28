@@ -346,3 +346,13 @@ test('Joy-Con e Pro Controller do jeito que o ditado escreve; "controle de Ninte
   assert.deepStrictEqual(um('Ana Clara um controle de nintendo finalizado'), ['JOY CON|PRO CONTROLLER 1|PRO CONTROLLER 2', 0, 1]);
   assert.deepStrictEqual(um('Ana Clara 2 controles testados'), ['CONTROLE', 2, 0]);
 });
+
+test('controles de PlayStation: DualSense, DualSense Edge e Raiju pelo ditado', () => {
+  const l = L.criarLeitor({ pessoas: ['ANA CLARA'], categorias: ['CONTROLE', 'PLAYSTATION 5', 'DUAL SENSE', 'DUALSENSE EDGE', 'RAIJU'], habitos: {}, ativos: [] });
+  const um = (t) => l.ler(t, '').linhas.map((x) => [x.categoria || x.categoriaOpcoes.join('|'), x.testados, x.finalizados])[0];
+  assert.deepStrictEqual(um('Ana Clara 2 duol sense normal finalizados'), ['DUAL SENSE', 0, 2]);
+  assert.deepStrictEqual(um('Ana Clara 1 dual sense edje testado'), ['DUALSENSE EDGE', 1, 0]);
+  assert.deepStrictEqual(um('Ana Clara 3 raijo finalizados'), ['RAIJU', 0, 3]);
+  assert.deepStrictEqual(um('Ana Clara um controle de playstation finalizado'), ['DUAL SENSE|DUALSENSE EDGE|RAIJU', 0, 1]);
+  assert.deepStrictEqual(um('Ana Clara 2 playstation 5 testados'), ['PLAYSTATION 5', 2, 0]);
+});
