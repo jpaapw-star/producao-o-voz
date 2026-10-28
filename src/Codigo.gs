@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.11.0';
+var VERSAO = '1.12.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -243,14 +243,22 @@ function apiInicio() {
     maximos: maximos_(ss),
     habitos: h.habitos,
     ativos: h.ativos,
-    hora: Number(Utilities.formatDate(new Date(), tz, 'H'))
+    hora: faixaDe_(Utilities.formatDate(new Date(), tz, 'HH:mm'))
   };
+}
+
+// Faixas de meia em meia hora: a faixa "7" vai das 07:30 às 08:30. Lançamento antigo em hora cheia (08:00) conta na faixa
+// em que começa a meia hora anterior (07:30 – 08:30).
+function faixaDe_(hhmm) {
+  var m = String(hhmm).match(/(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return (Number(m[1]) + (Number(m[2]) >= 30 ? 0 : -1) + 24) % 24;
 }
 
 function faixa_(hora) {
   var h = Math.floor(Number(hora));
   if (!(h >= 0 && h <= 23)) throw new Error('Faixa de horário inválida.');
-  var dois = function (n) { return ('0' + (n % 24)).slice(-2) + ':00'; };
+  var dois = function (n) { return ('0' + (n % 24)).slice(-2) + ':30'; };
   return { inicio: dois(h), fim: dois(h + 1) };
 }
 
@@ -301,7 +309,7 @@ function apiGravar(pedido) {
 
     // Mesma pessoa e categoria já lançadas hoje nesta faixa: confirma antes (evita lançar duas vezes).
     if (!pedido.confirmarRepetidos) {
-      var repetidas = repetidasNaFaixa_(aba, col, ultima, tz, dataTxt, f.inicio, linhas);
+      var repetidas = repetidasNaFaixa_(aba, col, ultima, tz, dataTxt, Math.floor(Number(pedido.hora)), linhas);
       if (repetidas.length) return { ok: false, repetidas: repetidas, faixa: f.inicio + ' – ' + f.fim };
     }
 
@@ -402,7 +410,7 @@ function colunasComArrayFormula_(aba, col) {
   return cols;
 }
 
-function repetidasNaFaixa_(aba, col, ultima, tz, dataTxt, inicio, linhas) {
+function repetidasNaFaixa_(aba, col, ultima, tz, dataTxt, hora, linhas) {
   if (ultima <= col.linhaCabecalho) return [];
   var de = Math.max(col.linhaCabecalho + 1, ultima - 400);
   var vals = aba.getRange(de, 1, ultima - de + 1, col.largura).getDisplayValues();
@@ -410,8 +418,7 @@ function repetidasNaFaixa_(aba, col, ultima, tz, dataTxt, inicio, linhas) {
   var vistas = {};
   vals.forEach(function (l) {
     if (dataTexto_(l[col.data], tz) !== hoje) return;
-    var m = String(l[col.inicio]).match(/(\d{1,2}):(\d{2})/);
-    if (!m || ('0' + m[1]).slice(-2) + ':' + m[2] !== inicio) return;
+    if (faixaDe_(l[col.inicio]) !== hora) return;
     vistas[semAcento_(l[col.pessoa]) + '|' + semAcento_(l[col.categoria])] = true;
   });
   return linhas.filter(function (x) { return vistas[semAcento_(x.pessoa) + '|' + semAcento_(x.categoria)]; })
@@ -469,7 +476,8 @@ function horarios_(ss, l) {
       : vazio ? SEM : de === null || ate === null || ate <= de ? 'confira entrada e saída (ex.: 08:00 e 12:00)' : 'ok';
     if (txt === 'ok') {
       var horas = mapa[nome] || (mapa[nome] = []);
-      for (var x = Math.floor(de); x < Math.ceil(ate); x++) if (horas.indexOf(x) < 0) horas.push(x);
+      // Trabalha na faixa x (x:30 – x+1:30) se fica nela pelo menos 15 minutos.
+      for (var x = 0; x < 24; x++) if (Math.min(ate, x + 1.5) - Math.max(de, x + 0.5) >= 0.25 && horas.indexOf(x) < 0) horas.push(x);
     }
     if (String(r[3]) !== txt) mudou = true;
     return [txt];
@@ -495,11 +503,17 @@ function agenda_(ss) {
   });
   return lista.sort();
 }
-// Faixa que a chamada de um horário cobra: a hora que acabou (08:30 cobra 07:00 – 08:00); dos 45 minutos em diante, a hora em curso.
+// Faixa que a chamada de um horário cobra: a que acabou (08:30 cobra 07:30 – 08:30). Com 15 minutos ou mais de faixa nova,
+// cobra a faixa em curso (16:45 cobra 16:30 – 17:30, para o fim do expediente).
+function horaDaAgenda_(h) {
+  var t = Number(h.slice(0, 2)) * 60 + Number(h.slice(3));
+  var atual = Math.floor((t - 30) / 60);
+  var x = t - (atual * 60 + 30) >= 15 ? atual : atual - 1;
+  return (x + 48) % 24;
+}
 function faixaDaAgenda_(h) {
-  var hora = Number(h.slice(0, 2)), min = Number(h.slice(3));
-  var x = min >= 45 ? hora : (hora + 23) % 24;
-  return ('0' + x).slice(-2) + ':00 – ' + ('0' + (x + 1) % 24).slice(-2) + ':00';
+  var f = faixa_(horaDaAgenda_(h));
+  return f.inicio + ' – ' + f.fim;
 }
 
 function apiSalvarAgenda(lista) {
@@ -544,11 +558,11 @@ function horariosAprendidos_(aba, col, ultima, tz, pessoas) {
   var dias = {}, porHora = {};
   vals.forEach(function (r) {
     var p = oficial[semAcento_(r[col.pessoa])], d = dataTexto_(r[col.data], tz);
-    var m = String(r[col.inicio]).match(/(\d{1,2}):/);
-    if (!p || !m || d < limite) return;
+    var fx = faixaDe_(r[col.inicio]);
+    if (!p || fx === null || d < limite) return;
     (dias[p] || (dias[p] = {}))[d] = true;
     var ph = porHora[p] || (porHora[p] = {});
-    (ph[Number(m[1])] || (ph[Number(m[1])] = {}))[d] = true;
+    (ph[fx] || (ph[fx] = {}))[d] = true;
   });
   Object.keys(porHora).forEach(function (p) {
     var total = Object.keys(dias[p]).length;
@@ -586,8 +600,7 @@ function apiChamada(hora) {
     var hoje = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
     aba.getRange(de, 1, ultima - de + 1, col.largura).getDisplayValues().forEach(function (r) {
       if (dataTexto_(r[col.data], tz) !== hoje) return;
-      var m = String(r[col.inicio]).match(/(\d{1,2}):(\d{2})/);
-      if (m && ('0' + m[1]).slice(-2) + ':' + m[2] === f.inicio) feitos[semAcento_(r[col.pessoa])] = true;
+      if (faixaDe_(r[col.inicio]) === h) feitos[semAcento_(r[col.pessoa])] = true;
     });
   }
   // Respostas de hoje na aba Chamada: "nada" vale para a faixa; "não veio" vale para o dia todo.

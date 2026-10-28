@@ -200,7 +200,7 @@
       estado.leitor = LeitorProducao.criarLeitor(d);
       estado.hora = d.hora;
       // Diferença entre o relógio do servidor e o do aparelho, para a faixa seguir a hora certa.
-      estado.ajusteHora = d.hora - new Date().getHours();
+      estado.ajusteHora = d.hora - faixaDoAparelho();
       abrirLancar();
       mostrarFila(); enviarFila(); pedirToqueParaSom();
     }).catch(function (e) {
@@ -217,7 +217,9 @@
     atualizar();
   }
 
-  function horaAgora() { return (new Date().getHours() + (estado.ajusteHora || 0) + 24) % 24; }
+  // Faixas de meia em meia hora: a faixa 7 vai das 07:30 às 08:30.
+  function faixaDoAparelho() { var d = new Date(); return (d.getHours() + (d.getMinutes() >= 30 ? 0 : -1) + 24) % 24; }
+  function horaAgora() { return (faixaDoAparelho() + (estado.ajusteHora || 0) + 48) % 24; }
 
   // A faixa acompanha o relógio até alguém mudar à mão.
   setInterval(function () {
@@ -254,7 +256,7 @@
   }
 
   function desenharFaixa() {
-    var dois = function (n) { return ('0' + ((n + 24) % 24)).slice(-2) + ':00'; };
+    var dois = function (n) { return ('0' + ((n + 24) % 24)).slice(-2) + ':30'; };
     $('faixa').textContent = dois(estado.hora) + ' – ' + dois(estado.hora + 1);
   }
   $('faixaMenos').onclick = function () { estado.hora = (estado.hora + 23) % 24; estado.horaManual = true; desenharFaixa(); };
@@ -665,7 +667,7 @@
     var nome = chamada.fila[0];
     chamada.vezes[nome] = (chamada.vezes[nome] || 0) + 1;
     var curto = bonito(nome.split(/\s+/).slice(0, 2).join(' '));
-    var frase = curto + ', falta a sua produção das ' + chamada.hora + ' horas.' + (chamada.vezes[nome] > 1 ? ' Segunda chamada.' : '');
+    var frase = curto + ', falta a sua produção das ' + chamada.hora + ' e meia às ' + ((chamada.hora + 1) % 24) + ' e meia.' + (chamada.vezes[nome] > 1 ? ' Segunda chamada.' : '');
     if (nome === chamada.teste) falar(frase); else anunciar(frase);
     desenharChamada();
     chamada.timer = setTimeout(semResposta, ESPERA);
@@ -851,12 +853,15 @@
     var todas = []; for (var x = 7; x <= 16; x++) todas.push(doisDigitos(x) + ':30');
     return todas.concat(['16:45']);
   }
-  // A chamada cobra a hora que acabou (08:30 cobra 07:00 – 08:00); dos 45 minutos em diante, a hora em curso (09:50 cobra 09:00 – 10:00).
+  // A chamada cobra a faixa que acabou (08:30 cobra 07:30 – 08:30); com 15 minutos ou mais de faixa nova, a faixa em curso
+  // (16:45 cobra 16:30 – 17:30, o fim do expediente). Mesma regra do servidor (horaDaAgenda_).
   function horaDaAgenda(h) {
-    var x = Number(h.slice(0, 2)) + (Number(h.slice(3)) >= 45 ? 0 : -1);
+    var t = Number(h.slice(0, 2)) * 60 + Number(h.slice(3));
+    var atual = Math.floor((t - 30) / 60);
+    var x = t - (atual * 60 + 30) >= 15 ? atual : atual - 1;
     return (x + (estado.ajusteHora || 0) + 48) % 24;
   }
-  function faixaTexto(x) { return doisDigitos(x) + ':00 – ' + doisDigitos((x + 1) % 24) + ':00'; }
+  function faixaTexto(x) { return doisDigitos(x) + ':30 – ' + doisDigitos((x + 1) % 24) + ':30'; }
   // O horário que está valendo agora: passou há menos de 30 minutos (o app aberto um pouco depois ainda chama).
   function agendadaAgora() {
     var m = agoraMin();
