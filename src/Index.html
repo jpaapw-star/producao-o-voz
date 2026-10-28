@@ -157,8 +157,8 @@
     <div style="display:flex;gap:8px;margin-top:10px"><input type="time" id="agendaNova" class="trocar" style="margin:0;flex:1;min-width:0" value="07:30"><button id="agendaPor" class="pilula" style="flex-shrink:0">Adicionar</button></div>
   </div>
   <div class="chave"><select id="voz" class="trocar" style="margin:0;flex:1;min-width:0"><option value="">Voz padrão do aparelho</option></select><button id="ouvirVoz" class="pilula" style="flex-shrink:0">Ouvir</button></div>
-  <div class="chave"><select id="testeNome" class="trocar" style="margin:0;flex:1;min-width:0"></select><button id="testar" class="pilula" style="flex-shrink:0">Testar</button></div>
-  <div class="dica">Deixe o app aberto neste aparelho, com o som ligado. Cada resposta fica na aba Chamada da planilha. Nos horários da chamada, ele fala o nome de quem está no horário e ainda não lançou a faixa, e repete a cada 2 minutos até a resposta; se ninguém estiver devendo, fica em silêncio. Com "Ouvir as respostas" ligado, depois de chamar ele ouve por 2 minutos: a pessoa diz a produção em voz alta ("Ana, 3 notebooks finalizados"), ele repete e grava. O horário vem da aba Horários; quem não está lá, pelo costume das últimas 2 semanas.</div>
+  <div class="chave"><select id="testeNome" class="trocar" style="margin:0;flex:1;min-width:0"></select><button id="testar" class="pilula" style="flex-shrink:0">Testar</button><button id="testarConversa" class="pilula" style="flex-shrink:0">Conversar</button></div>
+  <div class="dica">Deixe o app aberto neste aparelho, com o som ligado. Cada resposta fica na aba Chamada da planilha. Nos horários da chamada, ele fala o nome de quem está no horário e ainda não lançou a faixa, e repete a cada 2 minutos até a resposta; se ninguém estiver devendo, fica em silêncio. Com "Ouvir as respostas" ligado, depois de chamar ele ouve por 2 minutos: a pessoa diz a produção em voz alta ("Ana, 3 notebooks finalizados"), ele repete e grava. O horário vem da aba Horários; quem não está lá, pelo costume das últimas 2 semanas. "Conversar" testa a conversa com o nome escolhido, sem gravar nada.</div>
 </div>
 
 <div id="aviso" class="aviso"><span id="avisoTexto"></span><button id="desfazer">Desfazer</button></div>
@@ -609,7 +609,7 @@
   function ouvirRespostas(ate, aoOuvir) {
     pararDeOuvir();
     var tratar = aoOuvir || entendeuResposta;
-    if (!ouvirLigado() || !chamada.rodando || agoraCerto() >= ate) return;
+    if (!Reconhecer || (!conversa.teste && (!ouvirLigado() || !chamada.rodando)) || agoraCerto() >= ate) return;
     ouvirAte = ate;
     try {
       var r = new Reconhecer();
@@ -635,8 +635,9 @@
     $('ouvindo').textContent = '';
   }
   aCadaTique(function () {
-    if (!ouvindo || (agoraCerto() < ouvirAte && chamada.rodando)) return;
+    if (!ouvindo || (agoraCerto() < ouvirAte && (chamada.rodando || conversa.teste))) return;
     pararDeOuvir();
+    if (conversa.teste && conversa.etapa === 'esperando') return encerrarConversa('Não ouvi ninguém dizer sou eu. Teste terminado.');
     // Na conversa, silêncio até o fim da janela: desiste e chama a próxima pessoa.
     if (conversa.etapa === 'producao' || conversa.etapa === 'confirmar' || conversa.etapa === 'ia') encerrarConversa('Não ouvi resposta. Lance pela tela depois, por favor. Vou chamar a próxima pessoa.');
   });
@@ -645,7 +646,8 @@
   // Com algum computador ouvindo, todos chamam juntos uma pessoa; ela vai a qualquer computador e diz "sou eu";
   // esse computador pega a vez (o servidor deixa só um), pergunta o que ela fez, repete e grava depois do "sim".
   // Os outros ficam quietos e, quando a vez acaba, todos chamam a próxima (estado no servidor, conferido a cada 2 s).
-  var conversa = { ativa: false, vez: null, etapa: '', linhas: null, textos: [], tentativas: 0, ia: false, historico: [] };
+  // Com "teste" ligado (botão Conversar), é só este computador conversando: não pega a vez no servidor nem grava.
+  var conversa = { ativa: false, teste: false, vez: null, etapa: '', linhas: null, textos: [], tentativas: 0, ia: false, historico: [] };
   function semAcentoMin(t) { return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim(); }
   function juntarNomes(n) { return n.length > 1 ? n.slice(0, -1).join(', ') + ' e ' + n[n.length - 1] : (n[0] || ''); }
   function primeiroNome(p) { return bonito(String(p).split(/\s+/)[0]); }
@@ -655,7 +657,7 @@
     chamar('apiComecarVez', chamada.hora, alvo).then(function (e) {
       if (!chamada.rodando) return;
       if (!e || !e.conversa) return lerEFalar(alvo);
-      conversa.ativa = true; conversa.vez = null;
+      conversa.ativa = true; conversa.teste = false; conversa.vez = null;
       seguirVez(e);
     }).catch(function () { lerEFalar(alvo); });
   }
@@ -718,7 +720,7 @@
     var e = conversa.vez;
     pararDeOuvir();
     conversa.etapa = etapa;
-    chamar('apiPegarVez', chamada.hora, e.falarEm, aparelho).catch(function () {});
+    if (!conversa.teste) chamar('apiPegarVez', chamada.hora, e.falarEm, aparelho).catch(function () {});
     mostrarConversa(etapa === 'confirmar' ? 'Esperando ' + primeiroNome(e.pessoa) + ' confirmar…' : 'Ouvindo ' + primeiroNome(e.pessoa) + '…');
     falar(frase, function () { if (conversa.etapa === etapa) ouvirRespostas(agoraCerto() + 40000, ouviuNaConversa); });
   }
@@ -731,6 +733,12 @@
     pararDeOuvir();
     conversa.etapa = 'gravando';
     mostrarConversa('');
+    if (conversa.teste) {
+      return falar(frase, function () {
+        conversa.etapa = ''; conversa.teste = false; conversa.vez = null;
+        mostrarConversa('Teste terminado. Nada foi gravado na planilha.');
+      });
+    }
     falar(frase, function () {
       conversa.etapa = '';
       chamar('apiFimDaVez', chamada.hora, e.falarEm, aparelho).then(seguirVez).catch(function () {});
@@ -740,6 +748,11 @@
     var e = conversa.vez;
     pararDeOuvir();
     conversa.etapa = 'gravando';
+    if (conversa.teste) {
+      var seria = conversa.linhas === 'nada' ? 'nada nesta faixa' : conversa.linhas.map(resumoSemNome).join('; ');
+      avisar('Teste: gravaria ' + seria + '. Nada foi enviado.', '', null, 20000);
+      return encerrarConversa('Teste: eu gravaria ' + seria + '. Como é teste, nada foi enviado para a planilha.');
+    }
     if (conversa.linhas === 'nada') {
       responder(e.pessoa, 'nada');
       if (chamada.nada.indexOf(e.pessoa) < 0) chamada.nada.push(e.pessoa);
@@ -762,7 +775,7 @@
     pararDeOuvir();
     conversa.etapa = 'pensando';
     mostrarConversa('Pensando…');
-    chamar('apiPegarVez', chamada.hora, e.falarEm, aparelho).catch(function () {});
+    if (!conversa.teste) chamar('apiPegarVez', chamada.hora, e.falarEm, aparelho).catch(function () {});
     chamar('apiConversar', { pessoa: e.pessoa, hora: chamada.hora, historico: conversa.historico }).then(function (r) {
       if (!conversa.vez || conversa.vez.falarEm !== e.falarEm) return;
       conversa.historico.push({ quem: 'ia', texto: r.fala });
@@ -794,7 +807,7 @@
       pararDeOuvir();
       conversa.etapa = 'pegando';
       conversa.textos = [texto]; conversa.tentativas = 0; conversa.linhas = null;
-      chamar('apiPegarVez', chamada.hora, e.falarEm, aparelho).then(function (r) {
+      (conversa.teste ? Promise.resolve({ ok: true, vez: e }) : chamar('apiPegarVez', chamada.hora, e.falarEm, aparelho)).then(function (r) {
         if (!r.ok) { conversa.etapa = ''; return seguirVez(r.vez); }
         conversa.vez = r.vez;
         // Com a IA do Google configurada, a conversa é livre; sem ela, segue as regras do app.
@@ -1176,6 +1189,28 @@
     window.scrollTo(0, 0);
     falarVez(n);
     clearTimeout(chamada.timerTeste); chamada.timerTeste = setTimeout(testeSemResposta, ESPERA);
+  };
+  // Teste da conversa: este computador chama a pessoa escolhida e conversa de verdade (com a IA, se houver),
+  // mas no fim só diz o que gravaria. Não mexe na planilha nem na vez dos outros computadores.
+  $('testarConversa').onclick = function () {
+    var n = $('testeNome').value;
+    if (!n) return avisar('Escolha um nome para testar.');
+    if (!Reconhecer) return avisar('Este navegador não ouve pelo microfone. Use o Edge ou o Chrome no computador.');
+    if (chamada.rodando || conversa.ativa) return avisar('A chamada está rodando agora. Teste depois que ela terminar.');
+    if (conversa.teste) return avisar('Já tem um teste de conversa acontecendo.');
+    if (chamada.hora === null) chamada.hora = horaAgora();
+    var agora = agoraCerto();
+    var e = { pessoa: n, falarEm: agora, ate: agora + 120000, fila: [n], tentativas: {} };
+    pararDeOuvir();
+    conversa.teste = true; conversa.vez = e; conversa.etapa = 'chamando';
+    conversa.linhas = null; conversa.textos = []; conversa.historico = []; conversa.tentativas = 0;
+    window.scrollTo(0, 0);
+    falar('Teste de conversa. ' + nomeCurto(n) + ', venha lançar a sua produção ' + faixaFalada() + '. Quando chegar no computador, diga: sou eu.', function () {
+      if (!conversa.teste || conversa.vez !== e) return;
+      conversa.etapa = 'esperando';
+      ouvirRespostas(agoraCerto() + 60000, ouviuNaConversa);
+      mostrarConversa('Teste: diga "sou eu" e depois o que fez. Nada será gravado.');
+    });
   };
   $('voltarChamada').onclick = function () { abrirLancar(); };
 
