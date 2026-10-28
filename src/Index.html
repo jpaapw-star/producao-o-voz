@@ -246,12 +246,17 @@
   // Versão nova publicada: o aparelho se reinicia sozinho (rascunho e fila de gravação ficam guardados no aparelho).
   // Se o navegador não deixar, mostra um aviso com o botão Atualizar.
   var LINK_APP = 'https://script.google.com/macros/s/AKfycbyZ1ke6fEYJ7iWRkWS-Ly7SSzr3cqe0ogvOwlxqqRP3JM_BntXhHoVeTSQ0jLo9au2lsg/exec';
-  function irParaVersaoNova() { try { window.top.location.href = LINK_APP; } catch (e) { window.open(LINK_APP, '_top'); } }
+  var SITE = 'https://jpaapw-star.github.io/producao-o-voz/';
+  function recarregar() {
+    if (window.SITE_API) { location.replace(location.pathname + '?v=' + Date.now()); return; }
+    try { window.top.location.href = LINK_APP; } catch (e) { window.open(LINK_APP, '_top'); }
+  }
+  function irParaVersaoNova() { recarregar(); }
   function conferirVersao(v) {
     if (!v || !estado.dados || v === estado.dados.versao) return false;
     if (Date.now() - (Number(guardar.ler('recarregou')) || 0) > 300000) {
       guardar.por('recarregou', String(Date.now()));
-      try { window.top.location.href = LINK_APP; } catch (e) {}
+      try { recarregar(); } catch (e) {}
     }
     setTimeout(function () { avisar('Saiu uma versão nova do app.', 'Atualizar', irParaVersaoNova, 600000); }, 4000);
     return true;
@@ -455,7 +460,7 @@
       enviando = false;
       var msg = mensagem(e);
       // Sem internet: tenta de novo sozinho. Outro erro: devolve o texto para corrigir.
-      if (/network|http 0|conex|timeout|tempo/i.test(msg)) {
+      if (/network|http 0|conex|timeout|tempo|fetch|load failed/i.test(msg)) {
         mostrarFila();
         $('filaStatus').textContent += ' Sem conexão, tentando de novo…';
         setTimeout(enviarFila, 15000);
@@ -866,7 +871,7 @@
     // Pede a permissão do microfone agora, com alguém na frente do computador.
     try {
       var t = new Reconhecer(); t.lang = 'pt-BR';
-      t.onerror = function (e) { if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture') { guardar.por('ouvir', '0'); $('ouvir').checked = false; avisar('O microfone não foi liberado (' + e.error + ').'); } };
+      t.onerror = function (e) { if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture') { guardar.por('ouvir', '0'); $('ouvir').checked = false; avisar(window.SITE_API ? 'O microfone não foi liberado (' + e.error + ').' : 'O Google bloqueia o microfone aqui. Use o site do app.', window.SITE_API ? null : 'Abrir', window.SITE_API ? null : function () { window.open(SITE, '_top'); }, 20000); } };
       t.onstart = function () { avisar('Microfone liberado. Nas chamadas, ele vai ouvir as respostas.'); setTimeout(function () { try { t.abort(); } catch (x) {} }, 1500); };
       t.start();
     } catch (e) {}

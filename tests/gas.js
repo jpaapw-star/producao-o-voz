@@ -90,7 +90,11 @@ function carregarServidor(planilha, opcoes = {}) {
         return new Date(Date.UTC(+m[3], +m[2] - 1, +m[1], +m[4] + 3, +m[5], +m[6]));
       }
     },
-    HtmlService: {}
+    HtmlService: {},
+    ContentService: {
+      MimeType: { JSON: 'json' },
+      createTextOutput: (t) => ({ texto: t, setMimeType() { return this; } })
+    }
   };
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'Codigo.gs'), 'utf8'), ctx);

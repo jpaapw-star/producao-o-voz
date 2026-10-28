@@ -36,6 +36,16 @@ Mande o link. Não tem senha: quem tem o link pode lançar. No iPhone: abra no S
 - **Chamada**: nos horários da chamada (07:30 … 12:30, 14:30 … 16:30 e 16:45, ou os da aba **Agenda da chamada**), todos os computadores com o app aberto falam juntos, pelo relógio do Google. O horário de cada um vem da aba **Horários** (PESSOA, ENTRADA, SAÍDA; quem já saiu não é chamado). Quem não está na aba é chamado pelo costume das últimas 2 semanas. Supervisores não são chamados. Falta nunca é marcada sozinha.
 - **Conversa na chamada**: marque "Ouvir as respostas pelo microfone" nos computadores com microfone (Edge ou Chrome). Aí a chamada chama uma pessoa por vez; ela vai a qualquer computador, diz "sou eu" e fala o que fez; o computador repete, pergunta se está certo e grava. Sem nenhum computador ouvindo, a chamada fala a lista de todos que faltam e repete a cada 2 minutos.
 
+## Site próprio (para o microfone)
+
+A página do Apps Script fica dentro de um quadro do Google que bloqueia o microfone ("not-allowed"). Por isso o app também sai num endereço próprio, com a mesma tela e a mesma planilha:
+
+**https://jpaapw-star.github.io/producao-o-voz/**
+
+1. Uma vez só: no GitHub, abra o repositório › **Settings** › **Pages** e em **Source** escolha **GitHub Actions**.
+2. A cada mudança o site é publicado sozinho, logo depois do Apps Script.
+3. Nos computadores da chamada, use esse endereço (o abrir-chamada.bat já aponta para ele). Na primeira vez, o Edge pergunta do microfone: clique em **Permitir**.
+
 ## IA da conversa (opcional, grátis)
 
 Com a IA do Google, a conversa entende erros de fala, "é… hum…", correções e ajuda quem esqueceu.

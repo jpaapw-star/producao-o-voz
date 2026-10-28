@@ -376,3 +376,13 @@ test('conversa com a IA: Ollama Cloud é a reserva quando o Gemini falha', () =>
   assert.strictEqual(urls.length, 4, '3 modelos do Gemini e depois o Ollama');
   assert.deepStrictEqual(r.linhas, [{ categoria: 'CAIXA DE SOM', testados: 2, finalizados: 0, defeitos: 0 }]);
 });
+
+test('site próprio: doPost chama só funções api e devolve JSON', () => {
+  const s = carregarServidor(planilha());
+  const post = (corpo) => JSON.parse(s.doPost({ postData: { contents: JSON.stringify(corpo) } }).texto);
+  assert.ok(post({ fn: 'apiInicio', args: [] }).r.pessoas.length);
+  assert.match(post({ fn: 'config_', args: [] }).erro, /desconhecida/);
+  assert.match(post({ fn: 'autorizarIA' }).erro, /desconhecida/);
+  s.SEGREDOS.planilhaId = '';
+  assert.match(post({ fn: 'apiInicio' }).erro, /configurado/);
+});

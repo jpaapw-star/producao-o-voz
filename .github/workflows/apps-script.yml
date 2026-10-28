@@ -18,6 +18,8 @@ concurrency:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   testes:
@@ -84,3 +86,25 @@ jobs:
       - name: Apagar credenciais
         if: always()
         run: rm -f ~/.clasprc.json src/00_Segredos.gs
+
+  # Site próprio (GitHub Pages), onde o microfone funciona: https://jpaapw-star.github.io/producao-o-voz/
+  # Configuração única: Settings › Pages › Source: GitHub Actions. Sai depois do Apps Script, para a página nova
+  # já encontrar o servidor novo.
+  site:
+    needs: enviar
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.publicar.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/montar-site.js site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: publicar
+        uses: actions/deploy-pages@v4
+      - run: echo "Site: ${{ steps.publicar.outputs.page_url }}" | tee -a "$GITHUB_STEP_SUMMARY"
