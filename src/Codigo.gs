@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.13.0';
+var VERSAO = '1.13.1';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -468,7 +468,9 @@ function horarios_(ss, l) {
   var novos = l.pessoas.filter(function (p) { return !presentes[semAcento_(p)] && chefes.indexOf(semAcento_(p)) < 0; })
     .map(function (p) { return [p, '', '', SEM]; });
   if (novos.length) aba.getRange(n + 1, 1, novos.length, 4).setValues(novos);
-  var mapa = {}, mudou = false;
+  var mapa = {}, periodos = {}, mudou = false;
+  // Entrada e saída de cada um, para a chamada não chamar quem já foi embora ou ainda não chegou.
+  Object.defineProperty(mapa, 'periodos', { value: periodos });
   var situacao = vals.map(function (r) {
     var nome = oficial[semAcento_(r[0])], de = horaDe(r[1]), ate = horaDe(r[2]);
     var vazio = !String(r[1]).trim() && !String(r[2]).trim();
@@ -476,6 +478,7 @@ function horarios_(ss, l) {
       : vazio ? SEM : de === null || ate === null || ate <= de ? 'confira entrada e saída (ex.: 08:00 e 12:00)' : 'ok';
     if (txt === 'ok') {
       var horas = mapa[nome] || (mapa[nome] = []);
+      (periodos[nome] || (periodos[nome] = [])).push([de, ate]);
       // Trabalha na faixa x (x:30 – x+1:30) se fica nela pelo menos 15 minutos.
       for (var x = 0; x < 24; x++) if (Math.min(ate, x + 1.5) - Math.max(de, x + 0.5) >= 0.25 && horas.indexOf(x) < 0) horas.push(x);
     }
@@ -510,6 +513,22 @@ function horaDaAgenda_(h) {
   var atual = Math.floor((t - 30) / 60);
   var x = t - (atual * 60 + 30) >= 15 ? atual : atual - 1;
   return (x + 48) % 24;
+}
+// Horários da chamada: os da aba Agenda da chamada; sem nenhum, 07:30, 08:30… 16:30 e 16:45 (igual ao app).
+function horariosDaChamada_(ss) {
+  var ag = agenda_(ss);
+  if (ag.length) return ag;
+  var todas = [];
+  for (var x = 7; x <= 16; x++) todas.push(('0' + x).slice(-2) + ':30');
+  return todas.concat(['16:45']);
+}
+// Momento (em horas) em que a faixa h é cobrada: o último horário da chamada que cobra essa faixa (16:45 para 16:30 – 17:30).
+function momentoDaChamada_(ss, h) {
+  var momento = null;
+  horariosDaChamada_(ss).forEach(function (t) {
+    if (horaDaAgenda_(t) === h) momento = Number(t.slice(0, 2)) + Number(t.slice(3)) / 60;
+  });
+  return momento === null ? h + 1.5 : momento;
 }
 function faixaDaAgenda_(h) {
   var f = faixa_(horaDaAgenda_(h));
@@ -588,9 +607,17 @@ function apiChamada(hora) {
   var chefes = l.supervisores.map(semAcento_);
   var h = Math.floor(Number(hora));
   var fixos = horarios_(ss, l), aprendidos = horariosAprendidos_(aba, col, ultima, tz, l.pessoas);
+  // Pela aba Horários, só chama quem está no trabalho na hora da chamada (até 10 minutos depois da saída):
+  // quem sai 12:45 não é chamado às 13:30.
+  var momento = momentoDaChamada_(ss, h);
+  var presente = function (p) {
+    var per = fixos.periodos[p];
+    return !per || per.some(function (x) { return x[0] <= momento && momento <= x[1] + 10 / 60; });
+  };
   // Só chama quem trabalha nessa hora: pela aba Horários; quem não está lá, pelo costume das últimas 2 semanas.
   var ativos = habitos_(aba, col, ultima, tz, l.pessoas).ativos.filter(function (p) {
     if (chefes.indexOf(semAcento_(p)) >= 0) return false;
+    if (!presente(p)) return false;
     var horas = fixos[p] || aprendidos[p] || [];
     return horas.indexOf(h) >= 0;
   });

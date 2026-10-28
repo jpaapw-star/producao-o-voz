@@ -209,13 +209,25 @@ test('chamada chama só quem trabalha naquela hora (costume ou aba Horários), s
   hor.push(['DANIEL VARGAS', '08:00', '18:00']);
   s.apiResposta({ pessoa: 'DANIEL VARGAS', hora: 9, resposta: 'não veio' });
   c = JSON.parse(JSON.stringify(s.apiChamada(11)));
-  assert.deepStrictEqual(c.faltam, ['JULIA GOMES']);
+  // Julia sai 12:00: a chamada das 12:30 (faixa 11:30 – 12:30) não chama quem já foi embora.
+  assert.deepStrictEqual(c.faltam, []);
   assert.deepStrictEqual(c.naoVieram, ['DANIEL VARGAS']);
+  hor.find((r) => r[0] === 'julia gomes')[2] = '12:35';
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(11))).faltam, ['JULIA GOMES'], 'até 10 minutos depois da saída ainda chama');
+  // 16:45 cobra 16:30 – 17:30: quem sai 16:45 é chamado; quem sai 14:45 não é chamado às 15:30.
+  hor.find((r) => r[0] === 'julia gomes')[1] = '07:00';
+  hor.find((r) => r[0] === 'julia gomes')[2] = '16:45';
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(16))).faltam, ['JULIA GOMES']);
+  hor.find((r) => r[0] === 'julia gomes')[2] = '14:45';
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(14))).faltam, []);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(13))).faltam, ['JULIA GOMES']);
+  hor.find((r) => r[0] === 'julia gomes')[1] = '10:00';
+  hor.find((r) => r[0] === 'julia gomes')[2] = '12:00';
   assert.throws(() => s.apiResposta({ pessoa: 'FULANO', hora: 10, resposta: 'nada' }), /Configurações/);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiResposta({ pessoa: 'JULIA GOMES', hora: 11, resposta: 'não respondeu' }))), { ok: true });
   const r2 = s.apiResposta({ pessoa: 'JULIA GOMES', hora: 12, resposta: 'não respondeu' });
   assert.strictEqual(r2.falta, true, 'duas horas sem responder = falta');
-  c = JSON.parse(JSON.stringify(s.apiChamada(11)));
+  c = JSON.parse(JSON.stringify(s.apiChamada(9)));
   assert.deepStrictEqual(c.faltam, []);
   assert.deepStrictEqual(c.faltas, ['JULIA GOMES']);
   assert.strictEqual(s.apiResposta({ pessoa: 'JULIA GOMES', hora: 13, resposta: 'não respondeu' }).falta, undefined, 'falta só uma vez');
