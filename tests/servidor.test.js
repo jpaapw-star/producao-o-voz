@@ -181,6 +181,13 @@ test('chamada chama só quem trabalha naquela hora (costume ou aba Horários), s
   assert.deepStrictEqual(c.feitos, ['DANIEL VARGAS']);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(14))).faltam, ['JULIA GOMES']);
 
+  // Lista da vez: o primeiro a pedir fixa a lista; os outros computadores recebem a mesma, mesmo com lançamento novo.
+  const vez1 = JSON.parse(JSON.stringify(s.apiListaDaVez(14, 1761665405000)));
+  reg.push(['Outubro/2026', new Date(), '15:31', 'JULIA GOMES', 'ROTEADOR', 1, 0, 0, '14:30', '15:30']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiListaDaVez(14, 1761665405200))).faltam, vez1.faltam, 'mesma lista no mesmo instante');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiListaDaVez(14, 1761665525000))).faltam, [], 'instante novo lê de novo');
+  reg.pop();
+
   const hor = p.getSheetByName('Horários').dados;
   hor.push(['julia gomes', '10:00', '12:00']);
   hor.push(['FULANO', '08:00', '12:00']);
