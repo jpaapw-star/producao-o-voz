@@ -984,6 +984,8 @@ function promptConversa_(pessoa, faixa, categorias) {
     'Quando tiver a produção, repita tudo resumido e pergunte se está certo (acao "confirmar", com as linhas).',
     'Só use acao "gravar" quando a pessoa confirmar o resumo que você acabou de fazer; repita as mesmas linhas e fale algo curto como "Perfeito, enviando."',
     'Se ela disser que não fez nada nesta faixa, confirme; quando confirmar, use acao "nada". Se ela pedir para parar, use acao "desistir".',
+    'Na sala há conversas paralelas e o microfone pega outras pessoas. Se o texto claramente não for resposta para você '
+      + '(assunto de outra conversa, outra pessoa chamada), use acao "ignorar" e fala vazia.',
     'Nunca invente números. Responda só o JSON pedido.'
   ].join('\n');
 }
@@ -1013,7 +1015,7 @@ function apiConversar(pedido) {
         type: 'OBJECT',
         properties: {
           fala: { type: 'STRING' },
-          acao: { type: 'STRING', enum: ['perguntar', 'confirmar', 'gravar', 'nada', 'desistir'] },
+          acao: { type: 'STRING', enum: ['perguntar', 'confirmar', 'gravar', 'nada', 'desistir', 'ignorar'] },
           linhas: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
             categoria: { type: 'STRING' }, testados: { type: 'INTEGER' }, finalizados: { type: 'INTEGER' }, defeitos: { type: 'INTEGER' }
           }, required: ['categoria'] } }
@@ -1036,7 +1038,7 @@ function apiConversar(pedido) {
     } catch (e) { ultimoErro = 'resposta estranha: ' + e.message; }
   }
   if (reserva) {
-    var mensagens = [{ role: 'system', content: corpo.systemInstruction.parts[0].text + '\nResponda só com um JSON: {"fala": texto, "acao": perguntar|confirmar|gravar|nada|desistir, "linhas": [{"categoria", "testados", "finalizados", "defeitos"}]}.' }]
+    var mensagens = [{ role: 'system', content: corpo.systemInstruction.parts[0].text + '\nResponda só com um JSON: {"fala": texto, "acao": perguntar|confirmar|gravar|nada|desistir|ignorar, "linhas": [{"categoria", "testados", "finalizados", "defeitos"}]}.' }]
       .concat(contents.map(function (c) { return { role: c.role === 'model' ? 'assistant' : 'user', content: c.parts[0].text }; }));
     var r2 = UrlFetchApp.fetch('https://ollama.com/api/chat', {
       method: 'post', contentType: 'application/json', muteHttpExceptions: true,
@@ -1055,7 +1057,8 @@ function apiConversar(pedido) {
 function limparRespostaIA_(r, categorias) {
   var oficial = {};
   categorias.forEach(function (c) { oficial[semAcento_(c)] = c; });
-  var acao = ['perguntar', 'confirmar', 'gravar', 'nada', 'desistir'].indexOf(r.acao) >= 0 ? r.acao : 'perguntar';
+  var acao = ['perguntar', 'confirmar', 'gravar', 'nada', 'desistir', 'ignorar'].indexOf(r.acao) >= 0 ? r.acao : 'perguntar';
+  if (acao === 'ignorar') return { fala: '', acao: 'ignorar', linhas: [] };
   var desconhecida = '';
   var linhas = (r.linhas || []).map(function (x) {
     var c = oficial[semAcento_(x.categoria)];
