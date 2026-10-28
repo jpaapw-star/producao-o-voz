@@ -770,7 +770,12 @@
     if (l.childNodes.length) lista.appendChild(l);
   }
 
-  $('abrirChamada').onclick = function () { abrirChamada(false, true); };
+  // O botão só abre a tela, com a hora que acabou (11:07 mostra 10:00 – 11:00). Falar, só nos horários da chamada.
+  $('abrirChamada').onclick = function () {
+    tela('tChamada');
+    var d = new Date();
+    abrirChamada(false, false, horaDaAgenda(doisDigitos(d.getHours()) + ':' + doisDigitos(d.getMinutes())));
+  };
   // Teste: chama a pessoa escolhida agora, sem gravar nada na aba Chamada.
   $('testar').onclick = function () {
     var n = $('testeNome').value;
