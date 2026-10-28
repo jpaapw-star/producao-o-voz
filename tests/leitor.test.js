@@ -335,3 +335,14 @@ test('duas categorias coladas viram a categoria que junta as duas, se existir', 
   const r = l.ler('Ana Clara Um controle de nitendo finalizado', '').linhas;
   assert.deepStrictEqual(r.map((x) => [x.categoria, x.finalizados]), [['CONTROLE NINTENDO SWITCH', 1]]);
 });
+
+test('Joy-Con e Pro Controller do jeito que o ditado escreve; "controle de Nintendo" pergunta qual', () => {
+  const l = L.criarLeitor({ pessoas: ['ANA CLARA'], categorias: ['CONTROLE', 'NINTENDO SWITCH OLED', 'JOY CON', 'PRO CONTROLLER 1', 'PRO CONTROLLER 2'], habitos: {}, ativos: [] });
+  const um = (t) => l.ler(t, '').linhas.map((x) => [x.categoria || x.categoriaOpcoes.join('|'), x.testados, x.finalizados])[0];
+  assert.deepStrictEqual(um('Ana Clara 2 jói com finalizados'), ['JOY CON', 0, 2]);
+  assert.deepStrictEqual(um('Ana Clara 2 joicon testados'), ['JOY CON', 2, 0]);
+  assert.deepStrictEqual(um('Ana Clara 1 pró controler 2 finalizado'), ['PRO CONTROLLER 2', 0, 1]);
+  assert.deepStrictEqual(um('Ana Clara 3 pro controller 2 testados'), ['PRO CONTROLLER 2', 3, 0]);
+  assert.deepStrictEqual(um('Ana Clara um controle de nintendo finalizado'), ['JOY CON|PRO CONTROLLER 1|PRO CONTROLLER 2', 0, 1]);
+  assert.deepStrictEqual(um('Ana Clara 2 controles testados'), ['CONTROLE', 2, 0]);
+});

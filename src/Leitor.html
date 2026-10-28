@@ -131,7 +131,9 @@
     oled: ['o led', 'olede', 'oledi'], alexa: ['aleksa', 'alequissa', 'alecsa'], echo: ['eco', 'equo'], hub: ['rub', 'hab', 'rabi'],
     wifi: ['uaifai', 'wi fi', 'uai fai', 'uaifi'], bluetooth: ['blutufi', 'blututi', 'bluetufe', 'blutut'], smart: ['esmart', 'ismart', 'smarte'],
     led: ['lede', 'ledi'], joystick: ['joistique', 'djoistick', 'joistick'], drone: ['droni', 'drones'], light: ['laite', 'laiti', 'lait'],
-    ring: ['rin', 'ringue'], case: ['queise', 'queis', 'keise'], dock: ['doque', 'doqui'], controller: ['controle'], keyboard: ['teclado'],
+    ring: ['rin', 'ringue'], case: ['queise', 'queis', 'keise'], dock: ['doque', 'doqui'], controller: ['controle', 'controler', 'controla', 'controlar', 'controlador', 'control', 'contrôler'],
+    joy: ['joi', 'djoi', 'djoy', 'joe', 'jo'], con: ['com', 'cao', 'cone', 'kon', 'conn'], joycon: ['joicon', 'joycom', 'joicom', 'joi com', 'joy com', 'djoicon'],
+    pro: ['pra', 'prol'], keyboard: ['teclado'],
     microfone: ['microfoni', 'mic'], monitor: ['monitores'], printer: ['impressora'], scanner: ['escaner', 'escanner'], nobreak: ['no break', 'nobreique'],
     roteador: ['router', 'ruter', 'rauter'], fone: ['headphone', 'redfone', 'fones'], suporte: ['suport'], carregador: ['carregadores'],
     hd: ['aga de', 'agade'], ssd: ['esse esse de'], usb: ['u esse be', 'usbe'], hdmi: ['aga de eme i', 'agademei']
@@ -193,6 +195,14 @@
         if (n > 0 && seq.length > 1) apelidos.push({ tipo: 'cat', alvo: cat, seq: seq.slice(0, 1), completo: false });
       });
     });
+    // "controle de Nintendo/Switch" = Joy-Con ou Pro Controller (se a planilha não tiver "CONTROLE NINTENDO"); com mais de um, o app pergunta.
+    var deNintendo = categorias.filter(function (c) { return /joy|pro\s*contr/.test(normalizar(c)); });
+    var temControleNintendo = categorias.some(function (c) { var k = chaves(c); return k.indexOf(chave('controle')) >= 0 && (k.indexOf(chave('nintendo')) >= 0 || k.indexOf(chave('switch')) >= 0); });
+    if (deNintendo.length && !temControleNintendo) {
+      ['controle nintendo', 'controle switch', 'controle suite', 'controles nintendo', 'controle do nintendo', 'controle do switch', 'controle nintendu'].forEach(function (t) {
+        deNintendo.forEach(function (c) { apelidos.push({ tipo: 'cat', alvo: c, seq: chaves(t), completo: true }); });
+      });
+    }
     // "jogos" e "console" = categoria de video game, se a planilha não tiver categoria própria com essas palavras.
     var games = categorias.filter(function (c) { return chaves(c).indexOf(chave('game')) >= 0; });
     var temJogo = categorias.some(function (c) { var k = chaves(c); return k.indexOf(chave('jogo')) >= 0 || k.indexOf(chave('console')) >= 0; });
