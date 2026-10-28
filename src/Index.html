@@ -146,6 +146,7 @@
   <div id="chamadaVez"></div>
   <div id="chamadaLista"></div>
   <label class="chave"><span>Chamar sozinho aos 50 minutos de cada hora</span><input type="checkbox" id="chamarSozinho"></label>
+  <div class="chave"><select id="testeNome" class="trocar" style="margin:0;flex:1;min-width:0"></select><button id="testar" class="pilula" style="flex-shrink:0">Testar</button></div>
   <div class="dica">Deixe o app aberto neste aparelho, com o som ligado. Cada resposta fica na aba Chamada da planilha. Ele fala, um de cada vez, o nome de quem está no horário e ainda não lançou a hora. O horário vem da aba Horários; quem não está lá, pelo costume das últimas 2 semanas.</div>
 </div>
 
@@ -496,6 +497,7 @@
 
   // Cada resposta vai para a aba Chamada da planilha.
   function responder(nome, resposta) {
+    if (nome === chamada.teste) { chamada.teste = null; avisar('Teste: resposta "' + resposta + '" (não foi para a planilha).'); return; }
     chamar('apiResposta', { pessoa: nome, hora: chamada.hora, resposta: resposta }).catch(function (e) { avisar('Não guardou a resposta: ' + mensagem(e)); });
   }
   function tirarDaFila(nome, resposta, lista) {
@@ -520,7 +522,7 @@
     return chamar('apiChamada', chamada.hora).then(function (r) {
       var naFila = pessoasNaFila();
       var pendentes = r.faltam.filter(function (n) { return naFila.indexOf(n) < 0; });
-      chamada.fila = chamada.fila.filter(function (n) { return pendentes.indexOf(n) >= 0; });
+      chamada.fila = chamada.fila.filter(function (n) { return n === chamada.teste || pendentes.indexOf(n) >= 0; });
       chamada.feitos = r.feitos; chamada.nada = r.nada || []; chamada.naoVieram = r.naoVieram || [];
       desenharChamada();
     }).catch(function () {});
@@ -539,7 +541,16 @@
     var nome = chamada.fila[0].split(/\s+/).slice(0, 2).join(' ');
     falar(bonito(nome) + ', falta a sua produção das ' + chamada.hora + ' horas.');
     // Na chamada sozinha, quem não aparece em 45 segundos vai para o fim da fila; uma volta só.
-    if (chamada.auto) chamada.timer = setTimeout(function () { proximo(false); }, 45000);
+    if (chamada.teste && chamada.fila[0] === chamada.teste) {
+      var t = chamada.teste;
+      chamada.timer = setTimeout(function () {
+        if (chamada.teste !== t) return;
+        chamada.teste = null;
+        chamada.fila = chamada.fila.filter(function (n) { return n !== t; });
+        desenharChamada();
+        avisar('Teste: ' + bonito(t) + ' não respondeu em 45 segundos. Na chamada de verdade, iria para o fim da fila e ficaria "não respondeu" na aba Chamada.', 'Ok', function () { $('aviso').style.display = 'none'; }, 30000);
+      }, 45000);
+    } else if (chamada.auto) chamada.timer = setTimeout(function () { proximo(false); }, 45000);
   }
 
   // Passa a vez: o nome vai para o fim da fila.
@@ -556,6 +567,11 @@
   function abrirChamada(auto, forcar) {
     if (forcar || !$('tLancar').classList.contains('ativa') || !$('fala').value.trim()) tela('tChamada');
     chamada.auto = !!auto; chamada.rodada = 0;
+    var sel = $('testeNome');
+    if (!sel.options.length && estado.dados) {
+      sel.appendChild(el('option', '', 'Testar com…')).value = '';
+      estado.dados.pessoas.forEach(function (p) { var o = el('option', '', bonito(p)); o.value = p; sel.appendChild(o); });
+    }
     chamada.hora = horaAgora();
     $('chamadaFaixa').textContent = 'Procurando quem falta…';
     $('chamadaVez').innerHTML = ''; $('chamadaLista').innerHTML = '';
@@ -577,7 +593,7 @@
   function desenharChamada() {
     var faltam = chamada.fila.length;
     $('chamadaFaixa').textContent = 'Faixa ' + chamada.faixa + ' · ' +
-      (faltam ? (faltam === 1 ? 'falta 1' : 'faltam ' + faltam) : 'todo mundo lançou') +
+      (faltam ? (faltam === 1 ? 'falta 1' : 'faltam ' + faltam) : (chamada.feitos.length + chamada.nada.length + chamada.naoVieram.length ? 'todo mundo respondeu' : 'ninguém no horário')) +
       (chamada.feitos.length ? ' · ' + chamada.feitos.length + (chamada.feitos.length === 1 ? ' já lançou' : ' já lançaram') : '') +
       (chamada.nada.length ? ' · ' + chamada.nada.length + ' sem produção' : '');
     var vez = $('chamadaVez'); vez.innerHTML = '';
@@ -585,7 +601,7 @@
       var nome = chamada.fila[0];
       var c = el('div', 'cartao vez');
       c.appendChild(el('div', 'grande', bonito(nome)));
-      c.appendChild(el('div', 'item', 'Falta a produção das ' + chamada.faixa));
+      c.appendChild(el('div', 'item', nome === chamada.teste ? 'Teste: as respostas não vão para a aba Chamada' : 'Falta a produção das ' + chamada.faixa));
       var a = el('div', 'acoes');
       var b1 = el('button', 'principal', 'Lançar agora');
       b1.onclick = function () {
@@ -609,8 +625,9 @@
       vez.appendChild(c);
     } else {
       vez.appendChild(el('div', 'cartao vez', ''));
-      vez.firstChild.appendChild(el('div', 'grande', 'Pronto'));
-      vez.firstChild.appendChild(el('div', 'item', 'Todo mundo lançou a faixa ' + chamada.faixa + '.'));
+      var ninguem = !chamada.feitos.length && !chamada.nada.length && !chamada.naoVieram.length;
+      vez.firstChild.appendChild(el('div', 'grande', ninguem ? 'Ninguém no horário' : 'Pronto'));
+      vez.firstChild.appendChild(el('div', 'item', ninguem ? 'Ninguém trabalha na faixa ' + chamada.faixa + ' pelo horário. Para ouvir a chamada, use Testar.' : 'Todo mundo lançou a faixa ' + chamada.faixa + '.'));
     }
     var lista = $('chamadaLista'); lista.innerHTML = '';
     var l = el('div', 'lista');
@@ -626,6 +643,16 @@
   }
 
   $('abrirChamada').onclick = function () { abrirChamada(false, true); };
+  // Teste: chama a pessoa escolhida agora, sem gravar nada na aba Chamada.
+  $('testar').onclick = function () {
+    var n = $('testeNome').value;
+    if (!n) return;
+    chamada.teste = n;
+    if (!chamada.faixa) chamada.faixa = '';
+    chamada.fila = [n].concat(chamada.fila.filter(function (x) { return x !== n; }));
+    desenharChamada(); window.scrollTo(0, 0);
+    falarVez();
+  };
   $('voltarChamada').onclick = function () { clearTimeout(chamada.timer); chamada.auto = false; abrirLancar(); };
 
   // Chamada sozinha: uma vez por hora, a partir dos 50 minutos, com o app aberto.
