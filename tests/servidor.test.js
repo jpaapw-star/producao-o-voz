@@ -187,8 +187,12 @@ test('chamada chama só quem trabalha naquela hora (costume ou aba Horários), s
   c = JSON.parse(JSON.stringify(s.apiChamada(10)));
   assert.deepStrictEqual(c.faltam, ['JULIA GOMES']);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(14))).faltam, [], 'a aba vale mais que o costume');
-  assert.strictEqual(hor[1][3], 'ok');
-  assert.match(hor[2][3], /não achei/);
+  const linha = (n) => hor.find((r) => r[0] === n);
+  assert.strictEqual(linha('julia gomes')[3], 'ok');
+  assert.match(linha('FULANO')[3], /não achei/);
+  // A aba recebe sozinha as pessoas de Configurações (menos supervisores), sem horário.
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(linha('DANIEL VARGAS'))), ['DANIEL VARGAS', '', '', 'sem horário: chama pelo costume']);
+  assert.strictEqual(linha('ANA LEAL'), undefined, 'supervisora fica fora');
   s.apiResposta({ pessoa: 'julia gomes', hora: 10, resposta: 'nada' });
   c = JSON.parse(JSON.stringify(s.apiChamada(10)));
   assert.deepStrictEqual(c.faltam, []);
@@ -223,4 +227,17 @@ test('anúncio da chamada vale para todos os aparelhos', () => {
   assert.strictEqual(lido.anuncio.texto, 'Julia Gomes, falta a sua produção das 9 horas.');
   assert.strictEqual(lido.anuncio.id, r.anuncio.id);
   assert.ok(lido.anuncio.falarEm > r.agora);
+});
+
+test('agenda da chamada: salva na aba, em ordem, e volta no início', () => {
+  const p = planilha();
+  const s = carregarServidor(p);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().agenda)), []);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiSalvarAgenda(['16:50', '9:50', '10h05', '09:50']))), ['09:50', '10:05', '16:50']);
+  const ag = p.getSheetByName('Agenda da chamada').dados;
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(ag.slice(1))), [['09:50', '09:00 – 10:00'], ['10:05', '09:00 – 10:00'], ['16:50', '16:00 – 17:00']]);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().agenda)), ['09:50', '10:05', '16:50']);
+  s.apiSalvarAgenda(['11:50']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().agenda)), ['11:50'], 'tirar um horário apaga a linha');
+  assert.throws(() => s.apiSalvarAgenda(['25:00']), /inválido/);
 });
