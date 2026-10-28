@@ -10,9 +10,13 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.6.0';
+var VERSAO = '1.7.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
+var HORARIOS_ABA = 'Horários';
+var CHAMADA_ABA = 'Chamada';
+var CHAMADA_CABECALHO = ['QUANDO', 'DATA', 'FAIXA', 'PESSOA', 'RESPOSTA'];
+var RESPOSTAS = ['lançou', 'nada', 'não veio', 'não respondeu'];
 var LOG_CABECALHO = ['ID', 'QUANDO', 'QUEM LANÇOU', 'O QUE FOI FALADO', 'LINHAS', 'DESFEITO EM'];
 var LINHAS_HISTORICO = 3000;
 var MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro',
@@ -429,6 +433,146 @@ function assinatura_(linha, col) {
 }
 
 // Lançamentos de hoje feitos neste aparelho, do mais novo para o mais velho.
+// Aba Horários (opcional): PESSOA, ENTRADA, SAÍDA. Pode ter mais de uma linha por pessoa (manhã e tarde).
+// Devolve { PESSOA: [horas cheias em que trabalha] } e escreve na coluna D se entendeu cada linha.
+function horarios_(ss, l) {
+  var aba = abaPorNome_(ss, HORARIOS_ABA);
+  if (!aba) {
+    aba = ss.insertSheet(HORARIOS_ABA, ss.getSheets().length);
+    aba.appendRow(['PESSOA', 'ENTRADA', 'SAÍDA', 'SITUAÇÃO']);
+    aba.setFrozenRows(1);
+    return {};
+  }
+  var n = aba.getLastRow();
+  if (n < 2) return {};
+  var oficial = {};
+  l.pessoas.forEach(function (x) { oficial[semAcento_(x)] = x; });
+  var horaDe = function (v) {
+    var m = String(v).match(/(\d{1,2})(?:\s*[:h]\s*(\d{2}))?/);
+    return m && Number(m[1]) <= 24 ? Number(m[1]) + (Number(m[2]) || 0) / 60 : null;
+  };
+  var mapa = {}, mudou = false;
+  var vals = aba.getRange(2, 1, n - 1, 4).getDisplayValues();
+  var situacao = vals.map(function (r) {
+    var nome = oficial[semAcento_(r[0])], de = horaDe(r[1]), ate = horaDe(r[2]);
+    var txt = !String(r[0]).trim() && !r[1] && !r[2] ? '' : !nome ? 'não achei esse nome em Configurações'
+      : de === null || ate === null || ate <= de ? 'confira entrada e saída (ex.: 08:00 e 12:00)' : 'ok';
+    if (txt === 'ok') {
+      var horas = mapa[nome] || (mapa[nome] = []);
+      for (var x = Math.floor(de); x < Math.ceil(ate); x++) if (horas.indexOf(x) < 0) horas.push(x);
+    }
+    if (String(r[3]) !== txt) mudou = true;
+    return [txt];
+  });
+  if (mudou) aba.getRange(2, 4, situacao.length, 1).setValues(situacao);
+  return mapa;
+}
+
+// Horário pelo costume: horas em que a pessoa lançou em pelo menos 2 dias e em 40% dos dias que trabalhou (últimos 14 dias).
+function horariosAprendidos_(aba, col, ultima, tz, pessoas) {
+  var mapa = {};
+  if (ultima <= col.linhaCabecalho || col.inicio === undefined) return mapa;
+  var oficial = {};
+  pessoas.forEach(function (p) { oficial[semAcento_(p)] = p; });
+  var inicio = Math.max(col.linhaCabecalho + 1, ultima - LINHAS_HISTORICO + 1);
+  var vals = aba.getRange(inicio, 1, ultima - inicio + 1, col.largura).getDisplayValues();
+  var limite = Utilities.formatDate(new Date(Date.now() - 14 * 864e5), tz, 'yyyy-MM-dd');
+  var dias = {}, porHora = {};
+  vals.forEach(function (r) {
+    var p = oficial[semAcento_(r[col.pessoa])], d = dataTexto_(r[col.data], tz);
+    var m = String(r[col.inicio]).match(/(\d{1,2}):/);
+    if (!p || !m || d < limite) return;
+    (dias[p] || (dias[p] = {}))[d] = true;
+    var ph = porHora[p] || (porHora[p] = {});
+    (ph[Number(m[1])] || (ph[Number(m[1])] = {}))[d] = true;
+  });
+  Object.keys(porHora).forEach(function (p) {
+    var total = Object.keys(dias[p]).length;
+    mapa[p] = Object.keys(porHora[p]).filter(function (h) {
+      var n = Object.keys(porHora[p][h]).length;
+      return n >= 2 && n >= 0.4 * total;
+    }).map(Number);
+  });
+  return mapa;
+}
+
+// Chamada: quem trabalhou nos últimos 7 dias (menos supervisores) e ainda não tem linha hoje na faixa pedida.
+function apiChamada(hora) {
+  var cfg = config_();
+  var ss = abrir_(cfg);
+  var tz = ss.getSpreadsheetTimeZone();
+  var aba = abaPorNome_(ss, 'Registros');
+  if (!aba) throw new Error('Não achei a aba Registros.');
+  var col = colunasRegistros_(aba);
+  var l = listas_(ss);
+  var ultima = ultimaLinhaComDados_(aba, col);
+  var f = faixa_(hora);
+  var chefes = l.supervisores.map(semAcento_);
+  var h = Math.floor(Number(hora));
+  var fixos = horarios_(ss, l), aprendidos = horariosAprendidos_(aba, col, ultima, tz, l.pessoas);
+  // Só chama quem trabalha nessa hora: pela aba Horários; quem não está lá, pelo costume das últimas 2 semanas.
+  var ativos = habitos_(aba, col, ultima, tz, l.pessoas).ativos.filter(function (p) {
+    if (chefes.indexOf(semAcento_(p)) >= 0) return false;
+    var horas = fixos[p] || aprendidos[p] || [];
+    return horas.indexOf(h) >= 0;
+  });
+  var feitos = {};
+  if (ultima > col.linhaCabecalho) {
+    var de = Math.max(col.linhaCabecalho + 1, ultima - 600);
+    var hoje = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    aba.getRange(de, 1, ultima - de + 1, col.largura).getDisplayValues().forEach(function (r) {
+      if (dataTexto_(r[col.data], tz) !== hoje) return;
+      var m = String(r[col.inicio]).match(/(\d{1,2}):(\d{2})/);
+      if (m && ('0' + m[1]).slice(-2) + ':' + m[2] === f.inicio) feitos[semAcento_(r[col.pessoa])] = true;
+    });
+  }
+  // Respostas de hoje na aba Chamada: "nada" vale para a faixa; "não veio" vale para o dia todo.
+  var nada = {}, foraHoje = {};
+  var cham = ss.getSheetByName(CHAMADA_ABA);
+  if (cham && cham.getLastRow() > 1) {
+    var hojeIso = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    var n = cham.getLastRow(), ini = Math.max(2, n - 500);
+    cham.getRange(ini, 1, n - ini + 1, CHAMADA_CABECALHO.length).getDisplayValues().forEach(function (r) {
+      if (dataTexto_(r[1], tz) !== hojeIso) return;
+      var p = semAcento_(r[3]);
+      if (r[4] === 'não veio') foraHoje[p] = true;
+      if (r[4] === 'nada' && String(r[2]).indexOf(f.inicio) === 0) nada[p] = true;
+    });
+  }
+  var lista = function (teste) { return ativos.filter(function (p) { return teste(semAcento_(p)); }).sort(); };
+  return {
+    faixa: f.inicio + ' – ' + f.fim,
+    faltam: lista(function (p) { return !feitos[p] && !nada[p] && !foraHoje[p]; }),
+    feitos: lista(function (p) { return feitos[p]; }),
+    nada: lista(function (p) { return !feitos[p] && nada[p]; }),
+    naoVieram: lista(function (p) { return !feitos[p] && !nada[p] && foraHoje[p]; })
+  };
+}
+
+// Guarda a resposta de cada nome chamado na aba Chamada, para ver depois se a chamada funciona.
+function apiResposta(pedido) {
+  var cfg = config_();
+  var ss = abrir_(cfg);
+  var tz = ss.getSpreadsheetTimeZone();
+  var l = listas_(ss);
+  var oficial = {};
+  l.pessoas.forEach(function (x) { oficial[semAcento_(x)] = x; });
+  var pessoa = oficial[semAcento_(pedido && pedido.pessoa)];
+  if (!pessoa) throw new Error('Pessoa não está em Configurações.');
+  if (RESPOSTAS.indexOf(pedido.resposta) < 0) throw new Error('Resposta inválida.');
+  var f = faixa_(pedido.hora);
+  var aba = ss.getSheetByName(CHAMADA_ABA);
+  if (!aba) {
+    aba = ss.insertSheet(CHAMADA_ABA, ss.getSheets().length);
+    aba.appendRow(CHAMADA_CABECALHO);
+    aba.setFrozenRows(1);
+  }
+  var agora = new Date();
+  aba.appendRow([Utilities.formatDate(agora, tz, 'HH:mm'), Utilities.formatDate(agora, tz, 'dd/MM/yyyy'),
+    f.inicio + ' – ' + f.fim, pessoa, pedido.resposta]);
+  return true;
+}
+
 function apiHoje(quem) {
   var cfg = config_();
   var ss = abrir_(cfg);

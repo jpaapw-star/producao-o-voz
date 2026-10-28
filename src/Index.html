@@ -82,6 +82,19 @@
   .lanc .hora { font-weight: 600; font-variant-numeric: tabular-nums; }
   .item { color: var(--sec); font-size: 15px; margin-top: 4px; }
   .desfeito { opacity: .45; }
+  .vez { text-align: center; padding: 26px 16px 18px; }
+  .vez .grande { font-size: 30px; font-weight: 700; letter-spacing: -0.4px; }
+  .vez .item { margin-top: 6px; }
+.acoes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 18px; }
+  .acoes button { border: 0; border-radius: 12px; background: var(--campo); color: var(--texto); font: inherit;
+    font-size: 15px; font-weight: 600; padding: 12px 8px; cursor: pointer; }
+  .acoes button.principal { background: var(--botao); color: var(--botao-texto); }
+  .lista .linha { display: flex; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--linha); }
+  .lista .linha:last-child { border-bottom: 0; }
+  .lista .linha span:last-child { color: var(--sec); font-size: 15px; }
+  .chave { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--cartao);
+    border-radius: 14px; padding: 13px 14px; margin-top: 22px; }
+  .chave input { width: 22px; height: 22px; accent-color: var(--botao); }
 </style>
 </head>
 <body>
@@ -97,6 +110,7 @@
 <div id="tLancar" class="tela">
   <div class="topo">
     <h1>Produção</h1>
+    <button id="abrirChamada" class="pilula">Chamada</button>
   </div>
   <div class="faixa">
     <button id="faixaMenos" aria-label="Hora anterior">‹</button>
@@ -122,6 +136,18 @@
   <div id="listaHoje"></div>
 </div>
 
+<div id="tChamada" class="tela">
+  <div class="topo">
+    <h1>Chamada</h1>
+    <button id="voltarChamada" class="pilula">Voltar</button>
+  </div>
+  <p id="chamadaFaixa" class="sub"></p>
+  <div id="chamadaVez"></div>
+  <div id="chamadaLista"></div>
+  <label class="chave"><span>Chamar sozinho aos 50 minutos de cada hora</span><input type="checkbox" id="chamarSozinho"></label>
+  <div class="dica">Deixe o app aberto neste aparelho, com o som ligado. Cada resposta fica na aba Chamada da planilha. Ele fala, um de cada vez, o nome de quem está no horário e ainda não lançou a hora. O horário vem da aba Horários; quem não está lá, pelo costume das últimas 2 semanas.</div>
+</div>
+
 <div id="aviso" class="aviso"><span id="avisoTexto"></span><button id="desfazer">Desfazer</button></div>
 
 <?!= incluir_('Leitor') ?>
@@ -141,7 +167,7 @@
     hora: null, linhas: [], ajustes: {}, ultimo: null, gravando: false };
 
   function tela(id) {
-    ['tCarregando', 'tErro', 'tLancar', 'tHoje'].forEach(function (t) { $(t).classList.toggle('ativa', t === id); });
+    ['tCarregando', 'tErro', 'tLancar', 'tHoje', 'tChamada'].forEach(function (t) { $(t).classList.toggle('ativa', t === id); });
   }
 
   function chamar(nome) {
@@ -351,6 +377,7 @@
       $('fala').value = ''; guardar.tirar('rascunho'); estado.ajustes = {};
       atualizar();
       avisar('Gravado: ' + r.n + (r.n === 1 ? ' linha' : ' linhas') + ' · ' + r.faixa, 'Desfazer', desfazer, 15000);
+      if (chamada.voltar) { responder(chamada.voltar, 'lançou'); chamada.voltar = null; abrirChamada(chamada.auto); }
     }).catch(function (e) {
       estado.gravando = false; desenhar();
       avisar('Não gravou: ' + mensagem(e));
@@ -415,6 +442,163 @@
   }
   $('abrirHoje').onclick = abrirHoje;
   $('voltarHoje').onclick = function () { tela('tLancar'); };
+
+  /* ---------- chamada ---------- */
+  var chamada = { fila: [], feitos: [], nada: [], naoVieram: [], hora: null, faixa: '', auto: false, voltar: null, rodada: 0, timer: null, semResposta: {} };
+  var bonito = function (n) { return String(n).toLowerCase().replace(/(^|\s)(\S)/g, function (m, a, c) { return a + c.toUpperCase(); }); };
+  function hojeTexto() { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+
+  // Cada resposta vai para a aba Chamada da planilha.
+  function responder(nome, resposta) {
+    chamar('apiResposta', { pessoa: nome, hora: chamada.hora, resposta: resposta }).catch(function (e) { avisar('Não guardou a resposta: ' + mensagem(e)); });
+  }
+  function tirarDaFila(nome, resposta, lista) {
+    clearTimeout(chamada.timer);
+    responder(nome, resposta);
+    chamada.fila = chamada.fila.filter(function (n) { return n !== nome; });
+    lista.push(nome);
+    desenharChamada();
+    if (chamada.fila.length) chamarVez(); else falar('Chamada terminada.');
+  }
+
+  function falar(texto) {
+    try {
+      var u = new SpeechSynthesisUtterance(texto);
+      u.lang = 'pt-BR'; u.rate = 0.95;
+      window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+
+  // Antes de falar cada nome, confere na planilha quem já respondeu por outro aparelho (celular), para não chamar à toa.
+  function conferirFila() {
+    return chamar('apiChamada', chamada.hora).then(function (r) {
+      var pendentes = r.faltam;
+      chamada.fila = chamada.fila.filter(function (n) { return pendentes.indexOf(n) >= 0; });
+      chamada.feitos = r.feitos; chamada.nada = r.nada || []; chamada.naoVieram = r.naoVieram || [];
+      desenharChamada();
+    }).catch(function () {});
+  }
+  setInterval(function () { if ($('tChamada').classList.contains('ativa') && chamada.fila.length) conferirFila(); }, 20000);
+
+  function chamarVez() {
+    clearTimeout(chamada.timer);
+    if (!chamada.fila.length) return;
+    conferirFila().then(falarVez);
+  }
+
+  function falarVez() {
+    clearTimeout(chamada.timer);
+    if (!chamada.fila.length) { falar('Chamada terminada.'); return; }
+    var nome = chamada.fila[0].split(/\s+/).slice(0, 2).join(' ');
+    falar(bonito(nome) + ', falta a sua produção das ' + chamada.hora + ' horas.');
+    // Na chamada sozinha, quem não aparece em 45 segundos vai para o fim da fila; uma volta só.
+    if (chamada.auto) chamada.timer = setTimeout(function () { proximo(false); }, 45000);
+  }
+
+  // Passa a vez: o nome vai para o fim da fila.
+  function proximo(falarAgora) {
+    var nome = chamada.fila.shift();
+    if (nome) { chamada.fila.push(nome); chamada.rodada++; }
+    if (nome && !falarAgora && !chamada.semResposta[nome + chamada.hora]) { chamada.semResposta[nome + chamada.hora] = true; responder(nome, 'não respondeu'); }
+    if (chamada.auto && chamada.rodada >= chamada.fila.length) chamada.auto = false;
+    desenharChamada();
+    if (chamada.auto || falarAgora) chamarVez();
+  }
+
+  // Na chamada sozinha, quem está no meio de um lançamento não é interrompido: só aparece um aviso.
+  function abrirChamada(auto, forcar) {
+    if (forcar || !$('tLancar').classList.contains('ativa') || !$('fala').value.trim()) tela('tChamada');
+    chamada.auto = !!auto; chamada.rodada = 0;
+    chamada.hora = horaAgora();
+    $('chamadaFaixa').textContent = 'Procurando quem falta…';
+    $('chamadaVez').innerHTML = ''; $('chamadaLista').innerHTML = '';
+    return chamar('apiChamada', chamada.hora).then(function (r) {
+      chamada.faixa = r.faixa;
+      chamada.fila = r.faltam;
+      chamada.feitos = r.feitos; chamada.nada = r.nada || []; chamada.naoVieram = r.naoVieram || [];
+      if (!$('tChamada').classList.contains('ativa')) {
+        if (chamada.fila.length) avisar('Chamada: faltam ' + chamada.fila.length + ' na faixa ' + r.faixa + '.', 'Abrir', function () { abrirChamada(true, true); }, 60000);
+        return;
+      }
+      desenharChamada();
+      if (chamada.fila.length && (auto || forcar || chamada.voltarFalando)) chamarVez();
+      chamada.voltarFalando = false;
+    }).catch(function (e) { $('chamadaFaixa').textContent = mensagem(e); });
+  }
+
+  function desenharChamada() {
+    var faltam = chamada.fila.length;
+    $('chamadaFaixa').textContent = 'Faixa ' + chamada.faixa + ' · ' +
+      (faltam ? (faltam === 1 ? 'falta 1' : 'faltam ' + faltam) : 'todo mundo lançou') +
+      (chamada.feitos.length ? ' · ' + chamada.feitos.length + (chamada.feitos.length === 1 ? ' já lançou' : ' já lançaram') : '') +
+      (chamada.nada.length ? ' · ' + chamada.nada.length + ' sem produção' : '');
+    var vez = $('chamadaVez'); vez.innerHTML = '';
+    if (faltam) {
+      var nome = chamada.fila[0];
+      var c = el('div', 'cartao vez');
+      c.appendChild(el('div', 'grande', bonito(nome)));
+      c.appendChild(el('div', 'item', 'Falta a produção das ' + chamada.faixa));
+      var a = el('div', 'acoes');
+      var b1 = el('button', 'principal', 'Lançar agora');
+      b1.onclick = function () {
+        clearTimeout(chamada.timer); window.speechSynthesis && window.speechSynthesis.cancel();
+        chamada.voltar = nome; chamada.voltarFalando = true;
+        estado.hora = chamada.hora; estado.horaManual = false; desenharFaixa();
+        if (!$('fala').value.trim()) $('fala').value = bonito(nome) + ' ';
+        abrirLancar(); $('fala').focus();
+      };
+      var b2 = el('button', '', 'Nada nesta hora');
+      b2.onclick = function () { tirarDaFila(nome, 'nada', chamada.nada); };
+      var b3 = el('button', '', 'Depois');
+      b3.onclick = function () { proximo(true); };
+      var b4 = el('button', '', 'Não veio hoje');
+      b4.onclick = function () { tirarDaFila(nome, 'não veio', chamada.naoVieram); };
+      a.appendChild(b1); a.appendChild(b2); a.appendChild(b3); a.appendChild(b4);
+      c.appendChild(a);
+      var rep = el('button', 'link', 'Chamar de novo');
+      rep.onclick = chamarVez;
+      c.appendChild(rep);
+      vez.appendChild(c);
+    } else {
+      vez.appendChild(el('div', 'cartao vez', ''));
+      vez.firstChild.appendChild(el('div', 'grande', 'Pronto'));
+      vez.firstChild.appendChild(el('div', 'item', 'Todo mundo lançou a faixa ' + chamada.faixa + '.'));
+    }
+    var lista = $('chamadaLista'); lista.innerHTML = '';
+    var l = el('div', 'lista');
+    [[chamada.fila.slice(1), 'falta'], [chamada.feitos, 'lançou'], [chamada.nada, 'nada nesta hora'], [chamada.naoVieram, 'não veio']].forEach(function (g) {
+      g[0].forEach(function (n) {
+        var d = el('div', 'linha'); d.appendChild(el('span', '', bonito(n))); d.appendChild(el('span', '', g[1]));
+        // Tocar num nome que falta traz a pessoa para a vez (ex.: no celular, a pessoa responde por ela mesma).
+        if (g[1] === 'falta') { d.style.cursor = 'pointer'; d.onclick = function () { clearTimeout(chamada.timer); chamada.fila = [n].concat(chamada.fila.filter(function (x) { return x !== n; })); desenharChamada(); window.scrollTo(0, 0); }; }
+        l.appendChild(d);
+      });
+    });
+    if (l.childNodes.length) lista.appendChild(l);
+  }
+
+  $('abrirChamada').onclick = function () { abrirChamada(false, true); };
+  $('voltarChamada').onclick = function () { clearTimeout(chamada.timer); chamada.auto = false; abrirLancar(); };
+
+  // Chamada sozinha: uma vez por hora, a partir dos 50 minutos, com o app aberto.
+  var travaTela = null;
+  function manterTelaAcesa() {
+    try { if (guardar.ler('chamarSozinho') === '1' && navigator.wakeLock && !document.hidden) navigator.wakeLock.request('screen').then(function (t) { travaTela = t; }); } catch (e) {}
+  }
+  $('chamarSozinho').checked = guardar.ler('chamarSozinho') === '1';
+  $('chamarSozinho').onchange = function () {
+    guardar.por('chamarSozinho', this.checked ? '1' : '');
+    if (this.checked) { falar('Chamada ligada.'); manterTelaAcesa(); } else if (travaTela) { try { travaTela.release(); } catch (e) {} }
+  };
+  document.addEventListener('visibilitychange', manterTelaAcesa);
+  manterTelaAcesa();
+  setInterval(function () {
+    if (!estado.dados || guardar.ler('chamarSozinho') !== '1' || new Date().getMinutes() < 50) return;
+    var vez = hojeTexto() + ' ' + horaAgora();
+    if (guardar.ler('ultimaChamada') === vez) return;
+    guardar.por('ultimaChamada', vez);
+    abrirChamada(true);
+  }, 20000);
 
   iniciar();
 })();
