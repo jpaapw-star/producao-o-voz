@@ -107,4 +107,5 @@ jobs:
           path: site
       - id: publicar
         uses: actions/deploy-pages@v4
-      - run: echo "Site: ${{ steps.publicar.outputs.page_url }}" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Endereço do site
+        run: echo "Site no ar ${{ steps.publicar.outputs.page_url }}" | tee -a "$GITHUB_STEP_SUMMARY"
