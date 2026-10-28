@@ -469,9 +469,26 @@
     } catch (e) {}
   }
 
+  // Antes de falar cada nome, confere na planilha quem já respondeu por outro aparelho (celular), para não chamar à toa.
+  function conferirFila() {
+    return chamar('apiChamada', chamada.hora).then(function (r) {
+      var pendentes = r.faltam;
+      chamada.fila = chamada.fila.filter(function (n) { return pendentes.indexOf(n) >= 0; });
+      chamada.feitos = r.feitos; chamada.nada = r.nada || []; chamada.naoVieram = r.naoVieram || [];
+      desenharChamada();
+    }).catch(function () {});
+  }
+  setInterval(function () { if ($('tChamada').classList.contains('ativa') && chamada.fila.length) conferirFila(); }, 20000);
+
   function chamarVez() {
     clearTimeout(chamada.timer);
     if (!chamada.fila.length) return;
+    conferirFila().then(falarVez);
+  }
+
+  function falarVez() {
+    clearTimeout(chamada.timer);
+    if (!chamada.fila.length) { falar('Chamada terminada.'); return; }
     var nome = chamada.fila[0].split(/\s+/).slice(0, 2).join(' ');
     falar(bonito(nome) + ', falta a sua produção das ' + chamada.hora + ' horas.');
     // Na chamada sozinha, quem não aparece em 45 segundos vai para o fim da fila; uma volta só.
@@ -550,7 +567,12 @@
     var lista = $('chamadaLista'); lista.innerHTML = '';
     var l = el('div', 'lista');
     [[chamada.fila.slice(1), 'falta'], [chamada.feitos, 'lançou'], [chamada.nada, 'nada nesta hora'], [chamada.naoVieram, 'não veio']].forEach(function (g) {
-      g[0].forEach(function (n) { var d = el('div', 'linha'); d.appendChild(el('span', '', bonito(n))); d.appendChild(el('span', '', g[1])); l.appendChild(d); });
+      g[0].forEach(function (n) {
+        var d = el('div', 'linha'); d.appendChild(el('span', '', bonito(n))); d.appendChild(el('span', '', g[1]));
+        // Tocar num nome que falta traz a pessoa para a vez (ex.: no celular, a pessoa responde por ela mesma).
+        if (g[1] === 'falta') { d.style.cursor = 'pointer'; d.onclick = function () { clearTimeout(chamada.timer); chamada.fila = [n].concat(chamada.fila.filter(function (x) { return x !== n; })); desenharChamada(); window.scrollTo(0, 0); }; }
+        l.appendChild(d);
+      });
     });
     if (l.childNodes.length) lista.appendChild(l);
   }
