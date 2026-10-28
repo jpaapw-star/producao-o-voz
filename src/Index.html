@@ -119,6 +119,7 @@
   </div>
   <textarea id="fala" placeholder="Ex.: Ana Leal notebook 3 testados 2 finalizados. Julia roteador 4 testados."></textarea>
   <div class="dica">No celular, toque no microfone do teclado. No PC, aperte Windows + H. Diga sempre o nome da pessoa; pode falar várias de uma vez. Conversa no meio é ignorada, e "esquece" apaga a frase.</div>
+  <div id="filaStatus" class="geral"></div>
   <div id="avisosGerais" class="geral"></div>
   <div id="naoEntendi" class="naoentendi"></div>
   <div id="ignorados" class="naoentendi"></div>
@@ -164,7 +165,7 @@
   var aparelho = guardar.ler('aparelho');
   if (!aparelho) { aparelho = 'Aparelho ' + Math.random().toString(36).slice(2, 6).toUpperCase(); guardar.por('aparelho', aparelho); }
   var estado = { dados: null, leitor: null,
-    hora: null, linhas: [], ajustes: {}, ultimo: null, gravando: false };
+    hora: null, linhas: [], ajustes: {}, ultimo: null };
 
   function tela(id) {
     ['tCarregando', 'tErro', 'tLancar', 'tHoje', 'tChamada'].forEach(function (t) { $(t).classList.toggle('ativa', t === id); });
@@ -191,6 +192,7 @@
       // Diferença entre o relógio do servidor e o do aparelho, para a faixa seguir a hora certa.
       estado.ajusteHora = d.hora - new Date().getHours();
       abrirLancar();
+      mostrarFila(); enviarFila();
     }).catch(function (e) {
       tela('tErro'); $('erroInicio').textContent = mensagem(e);
     });
@@ -324,8 +326,8 @@
     var prontas = estado.linhas.filter(function (l) { return !l.problemas.length; }).length;
     var b = $('gravar');
     var todas = estado.linhas.length;
-    b.disabled = estado.gravando || !todas || prontas !== todas;
-    b.textContent = estado.gravando ? 'Gravando…' : (todas ? 'Gravar ' + todas + (todas === 1 ? ' linha' : ' linhas') : 'Gravar');
+    b.disabled = !todas || prontas !== todas;
+    b.textContent = todas ? 'Gravar ' + todas + (todas === 1 ? ' linha' : ' linhas') : 'Gravar';
   }
 
   function opcoes(titulo, lista, escolher) {
@@ -356,33 +358,77 @@
     s.focus();
   }
 
-  function gravar(confirmarRepetidos) {
-    if (estado.gravando) return;
-    estado.gravando = true; desenhar();
-    var pedido = {
-      quem: aparelho, hora: estado.hora, texto: $('fala').value, confirmarRepetidos: !!confirmarRepetidos,
-      linhas: estado.linhas.map(function (l) {
-        return { pessoa: l.pessoa, categoria: l.categoria, testados: l.testados, finalizados: l.finalizados, defeitos: l.defeitos };
-      })
-    };
-    chamar('apiGravar', pedido).then(function (r) {
-      estado.gravando = false;
+  // Gravar não espera a planilha: o pedido entra numa fila (guardada no aparelho) e vai em segundo plano,
+  // um de cada vez. O campo fica livre na hora para a próxima frase.
+  var filaGravar = [];
+  try { filaGravar = JSON.parse(guardar.ler('fila') || '[]'); } catch (e) { filaGravar = []; }
+  var enviando = false;
+  function salvarFila() { guardar.por('fila', JSON.stringify(filaGravar)); mostrarFila(); }
+  function mostrarFila() {
+    var n = filaGravar.length;
+    $('filaStatus').textContent = n ? 'Gravando ' + n + (n === 1 ? ' lançamento' : ' lançamentos') + ' na planilha…' : '';
+  }
+  function pessoasNaFila() {
+    var nomes = [];
+    filaGravar.forEach(function (x) { x.pedido.linhas.forEach(function (l) { nomes.push(l.pessoa); }); });
+    return nomes;
+  }
+
+  function gravar() {
+    if (!estado.linhas.length) return;
+    filaGravar.push({
+      chamado: chamada.voltar || null,
+      pedido: {
+        quem: aparelho, hora: estado.hora, texto: $('fala').value, confirmarRepetidos: false,
+        linhas: estado.linhas.map(function (l) {
+          return { pessoa: l.pessoa, categoria: l.categoria, testados: l.testados, finalizados: l.finalizados, defeitos: l.defeitos };
+        })
+      }
+    });
+    salvarFila();
+    estado.horaManual = false;
+    $('fala').value = ''; guardar.tirar('rascunho'); estado.ajustes = {};
+    atualizar();
+    if (chamada.voltar) { chamada.voltar = null; abrirChamada(chamada.auto); } else $('fala').focus();
+    enviarFila();
+  }
+
+  function enviarFila() {
+    if (enviando || !filaGravar.length) return;
+    enviando = true;
+    var item = filaGravar[0];
+    chamar('apiGravar', item.pedido).then(function (r) {
+      enviando = false;
+      filaGravar.shift(); salvarFila();
       if (r.repetidas) {
-        desenhar();
-        avisar('Já tem lançamento de ' + r.repetidas.join(', ') + ' em ' + r.faixa + '.', 'Gravar mesmo assim', function () { gravar(true); }, 20000);
+        avisar('Já tem lançamento de ' + r.repetidas.join(', ') + ' em ' + r.faixa + '.', 'Gravar mesmo assim', function () {
+          item.pedido.confirmarRepetidos = true; filaGravar.unshift(item); salvarFila(); enviarFila();
+        }, 30000);
+      } else {
+        estado.ultimo = r.id;
+        avisar('Gravado: ' + r.n + (r.n === 1 ? ' linha' : ' linhas') + ' · ' + r.faixa, 'Desfazer', desfazer, 15000);
+        if (item.chamado) responder(item.chamado, 'lançou');
+      }
+      enviarFila();
+    }).catch(function (e) {
+      enviando = false;
+      var msg = mensagem(e);
+      // Sem internet: tenta de novo sozinho. Outro erro: devolve o texto para corrigir.
+      if (/network|http 0|conex|timeout|tempo/i.test(msg)) {
+        mostrarFila();
+        $('filaStatus').textContent += ' Sem conexão, tentando de novo…';
+        setTimeout(enviarFila, 15000);
         return;
       }
-      estado.ultimo = r.id;
-      estado.horaManual = false;
-      $('fala').value = ''; guardar.tirar('rascunho'); estado.ajustes = {};
-      atualizar();
-      avisar('Gravado: ' + r.n + (r.n === 1 ? ' linha' : ' linhas') + ' · ' + r.faixa, 'Desfazer', desfazer, 15000);
-      if (chamada.voltar) { responder(chamada.voltar, 'lançou'); chamada.voltar = null; abrirChamada(chamada.auto); }
-    }).catch(function (e) {
-      estado.gravando = false; desenhar();
-      avisar('Não gravou: ' + mensagem(e));
+      filaGravar.shift(); salvarFila();
+      avisar('Não gravou: ' + msg, 'Voltar o texto', function () {
+        $('fala').value = ($('fala').value.trim() ? $('fala').value.trim() + '\n' : '') + item.pedido.texto;
+        guardar.por('rascunho', $('fala').value); atualizar();
+      }, 60000);
+      enviarFila();
     });
   }
+  window.addEventListener('online', enviarFila);
   $('gravar').onclick = function () { gravar(false); };
 
   var timerAviso = null, acaoAviso = null;
@@ -472,7 +518,8 @@
   // Antes de falar cada nome, confere na planilha quem já respondeu por outro aparelho (celular), para não chamar à toa.
   function conferirFila() {
     return chamar('apiChamada', chamada.hora).then(function (r) {
-      var pendentes = r.faltam;
+      var naFila = pessoasNaFila();
+      var pendentes = r.faltam.filter(function (n) { return naFila.indexOf(n) < 0; });
       chamada.fila = chamada.fila.filter(function (n) { return pendentes.indexOf(n) >= 0; });
       chamada.feitos = r.feitos; chamada.nada = r.nada || []; chamada.naoVieram = r.naoVieram || [];
       desenharChamada();
@@ -514,7 +561,8 @@
     $('chamadaVez').innerHTML = ''; $('chamadaLista').innerHTML = '';
     return chamar('apiChamada', chamada.hora).then(function (r) {
       chamada.faixa = r.faixa;
-      chamada.fila = r.faltam;
+      var naFila = pessoasNaFila();
+      chamada.fila = r.faltam.filter(function (n) { return naFila.indexOf(n) < 0; });
       chamada.feitos = r.feitos; chamada.nada = r.nada || []; chamada.naoVieram = r.naoVieram || [];
       if (!$('tChamada').classList.contains('ativa')) {
         if (chamada.fila.length) avisar('Chamada: faltam ' + chamada.fila.length + ' na faixa ' + r.faixa + '.', 'Abrir', function () { abrirChamada(true, true); }, 60000);
