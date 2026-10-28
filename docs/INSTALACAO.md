@@ -46,4 +46,6 @@ Sem isso, cada aparelho usa a voz que já tem. Com isso, a chamada usa as vozes 
 4. No GitHub, em **Settings › Secrets and variables › Actions › New repository secret**, crie o segredo `TTS_CHAVE` e cole a chave lá.
 5. Rode **Actions › Apps Script › Run workflow** e abra o link do app uma vez logado na sua conta Google. Aceite a nova permissão, "conectar a serviço externo", porque é por ela que o app chama a voz do Google.
 
+**Sem cartão:** em vez dos passos 1 a 3, crie uma chave em [aistudio.google.com](https://aistudio.google.com) › Get API key › **Create API key in new project** (projeto só para a voz, para não dividir o limite com outro app). O app percebe sozinho e usa a voz do Gemini, que tem as mesmas vozes. Ela é grátis, mas tem um limite de pedidos por dia; frases repetidas ficam guardadas 6 horas e não contam de novo. Quando o limite acaba, os aparelhos falam com a voz deles.
+
 Na tela Chamada, em **Voz**, aparecem as vozes "natural do Google". Se a internet ou a voz falhar, o aparelho fala com a voz dele.
