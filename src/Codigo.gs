@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.8.4';
+var VERSAO = '1.8.5';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -236,6 +236,7 @@ function apiInicio() {
     pessoas: l.pessoas,
     categorias: l.categorias,
     apelidos: apelidos_(ss, l),
+    comHorario: Object.keys(horarios_(ss, l)).length,
     supervisores: l.supervisores,
     maximos: maximos_(ss),
     habitos: h.habitos,
@@ -441,22 +442,29 @@ function horarios_(ss, l) {
     aba = ss.insertSheet(HORARIOS_ABA, ss.getSheets().length);
     aba.appendRow(['PESSOA', 'ENTRADA', 'SAÍDA', 'SITUAÇÃO']);
     aba.setFrozenRows(1);
-    return {};
   }
-  var n = aba.getLastRow();
-  if (n < 2) return {};
   var oficial = {};
   l.pessoas.forEach(function (x) { oficial[semAcento_(x)] = x; });
   var horaDe = function (v) {
     var m = String(v).match(/(\d{1,2})(?:\s*[:h]\s*(\d{2}))?/);
     return m && Number(m[1]) <= 24 ? Number(m[1]) + (Number(m[2]) || 0) / 60 : null;
   };
+  var SEM = 'sem horário: chama pelo costume';
+  var n = aba.getLastRow();
+  var vals = n >= 2 ? aba.getRange(2, 1, n - 1, 4).getDisplayValues() : [];
+  // Mantém a aba com as mesmas pessoas de Configurações (menos supervisores): quem falta entra no fim, sem horário.
+  var presentes = {};
+  vals.forEach(function (r) { presentes[semAcento_(r[0])] = true; });
+  var chefes = l.supervisores.map(semAcento_);
+  var novos = l.pessoas.filter(function (p) { return !presentes[semAcento_(p)] && chefes.indexOf(semAcento_(p)) < 0; })
+    .map(function (p) { return [p, '', '', SEM]; });
+  if (novos.length) aba.getRange(n + 1, 1, novos.length, 4).setValues(novos);
   var mapa = {}, mudou = false;
-  var vals = aba.getRange(2, 1, n - 1, 4).getDisplayValues();
   var situacao = vals.map(function (r) {
     var nome = oficial[semAcento_(r[0])], de = horaDe(r[1]), ate = horaDe(r[2]);
-    var txt = !String(r[0]).trim() && !r[1] && !r[2] ? '' : !nome ? 'não achei esse nome em Configurações'
-      : de === null || ate === null || ate <= de ? 'confira entrada e saída (ex.: 08:00 e 12:00)' : 'ok';
+    var vazio = !String(r[1]).trim() && !String(r[2]).trim();
+    var txt = !String(r[0]).trim() && vazio ? '' : !nome ? 'não achei esse nome em Configurações'
+      : vazio ? SEM : de === null || ate === null || ate <= de ? 'confira entrada e saída (ex.: 08:00 e 12:00)' : 'ok';
     if (txt === 'ok') {
       var horas = mapa[nome] || (mapa[nome] = []);
       for (var x = Math.floor(de); x < Math.ceil(ate); x++) if (horas.indexOf(x) < 0) horas.push(x);
