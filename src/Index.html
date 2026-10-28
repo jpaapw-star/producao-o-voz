@@ -401,12 +401,24 @@
     return nomes;
   }
 
+  // Quem está sendo cobrado na chamada e lança na meia hora seguinte (15:37 respondendo a chamada das 15:30) lança a faixa cobrada
+  // (14:30 – 15:30), não a faixa que acabou de começar. Faixa mudada à mão vale como está.
+  function horaDoLancamento() {
+    if (estado.horaManual || chamada.hora === null || chamada.hora === estado.hora) return estado.hora;
+    // Só na primeira meia hora da faixa nova (até 16:00 para a chamada das 15:30).
+    if ((chamada.hora + 1) % 24 !== estado.hora || new Date().getMinutes() < 30) return estado.hora;
+    var cobrados = chamada.fila.concat(chamada.semResposta);
+    var todos = estado.linhas.every(function (l) { return cobrados.indexOf(l.pessoa) >= 0; });
+    return todos ? chamada.hora : estado.hora;
+  }
+
   function gravar() {
     if (!estado.linhas.length) return;
+    var horaLanc = horaDoLancamento();
     filaGravar.push({
       chamado: chamada.voltar || null,
       pedido: {
-        quem: aparelho, hora: estado.hora, texto: $('fala').value, confirmarRepetidos: false,
+        quem: aparelho, hora: horaLanc, texto: $('fala').value, confirmarRepetidos: false,
         linhas: estado.linhas.map(function (l) {
           return { pessoa: l.pessoa, categoria: l.categoria, testados: l.testados, finalizados: l.finalizados, defeitos: l.defeitos };
         })
@@ -517,11 +529,11 @@
   $('voltarHoje').onclick = function () { tela('tLancar'); };
 
   /* ---------- chamada ---------- */
-  // Regras da chamada: um nome por vez. Respondeu, o próximo vem em 5 segundos. Sem resposta em 2 minutos,
-  // o nome vai para o fim da fila e é chamado mais uma vez. Duas horas do dia sem responder = falta no dia (planilha).
-  var ESPERA = 120000, PAUSA = 5000;
+  // Regras da chamada: fala todos os nomes que faltam de uma vez. Quem não responder em 2 minutos é chamado de novo
+  // (segunda chamada, de novo todos juntos); depois disso fica "não respondeu". Duas horas do dia sem responder = falta no dia (planilha).
+  var ESPERA = 120000;
   var chamada = { fila: [], vezes: {}, semResposta: [], faltas: [], feitos: [], nada: [], naoVieram: [], hora: null, faixa: '',
-    auto: false, rodando: false, voltar: null, timer: null, teste: null };
+    auto: false, rodando: false, rodada: 0, voltar: null, timer: null, timerTeste: null, teste: null };
   var bonito = function (n) { return String(n).toLowerCase().replace(/(^|\s)(\S)/g, function (m, a, c) { return a + c.toUpperCase(); }); };
   function hojeTexto() { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
 
@@ -534,13 +546,13 @@
   }
 
   function respondeu(nome, resposta, lista) {
-    clearTimeout(chamada.timer);
     var eraTeste = nome === chamada.teste;
+    if (eraTeste) clearTimeout(chamada.timerTeste);
     responder(nome, resposta);
     chamada.fila = chamada.fila.filter(function (n) { return n !== nome; });
     if (!eraTeste) lista.push(nome);
     desenharChamada();
-    if (chamada.rodando) proximaVez(PAUSA);
+    conferirFim();
   }
 
   // Voz escolhida neste aparelho (cada aparelho tem as suas; as "Natural"/"Online" do Edge são as mais humanas).
@@ -592,6 +604,7 @@
       chamada.fila = chamada.fila.filter(function (n) { return n === chamada.teste || pendentes.indexOf(n) >= 0; });
       guardarListas(r);
       desenharChamada();
+      conferirFim();
     }).catch(function () {});
   }
   setInterval(function () { if ($('tChamada').classList.contains('ativa') && chamada.fila.length) conferirFila(); }, 20000);
@@ -604,7 +617,7 @@
     var mmss = Math.floor(resto / 60) + ':' + ('0' + resto % 60).slice(-2);
     var txt;
     if (chamada.teste) txt = chamada.proximoTexto ? chamada.proximoTexto + ' em ' + mmss : 'Teste em andamento';
-    else if (chamada.rodando && chamada.proximoTexto) txt = chamada.proximoTexto + ' em ' + mmss;
+    else if (chamada.rodando && chamada.proximoTexto && chamada.proximoEm >= Date.now()) txt = chamada.proximoTexto + ' em ' + mmss;
     else {
       var prox = proximaAgendada();
       txt = ligada() ? 'Próxima chamada às ' + prox + ' (faixa ' + faixaTexto(horaDaAgenda(prox)) + ').' : 'Chamada automática desligada neste aparelho.';
@@ -613,53 +626,65 @@
   }
   setInterval(function () { if ($('tChamada').classList.contains('ativa')) mostrarProximo(); }, 1000);
 
-  function proximaVez(ms, semConferir) {
-    clearTimeout(chamada.timer);
-    if (chamada.fila.length && chamada.rodando) planejar(ms, 'Chama ' + bonito(chamada.fila[0]) + (chamada.vezes[chamada.fila[0]] ? ' (segunda chamada)' : ''));
-    if (!chamada.fila.length) {
-      if (chamada.rodando) { chamada.rodando = false; chamada.proximoTexto = ''; falar('Chamada terminada.'); mostrarProximo(); }
-      return;
-    }
-    chamada.timer = setTimeout(semConferir ? falarVez : chamarVez, ms);
-  }
+  function nomeCurto(nome) { return bonito(nome.split(/\s+/).slice(0, 2).join(' ')); }
+  function faixaFalada() { return 'das ' + chamada.hora + ' e meia às ' + ((chamada.hora + 1) % 24) + ' e meia'; }
+  function pendentesReais() { return chamada.fila.filter(function (n) { return n !== chamada.teste; }); }
 
-  function chamarVez() {
+  // Fala todos os nomes que faltam numa frase só ("Falta a produção das 15 e meia às 16 e meia de: Ana, Bruno e Carla.").
+  function falarRodada() {
     clearTimeout(chamada.timer);
-    if (!chamada.fila.length) return proximaVez(0);
-    conferirFila().then(falarVez);
-  }
-
-  function falarVez() {
-    clearTimeout(chamada.timer);
-    if (!chamada.fila.length) return proximaVez(0);
-    var nome = chamada.fila[0];
-    chamada.vezes[nome] = (chamada.vezes[nome] || 0) + 1;
-    var curto = bonito(nome.split(/\s+/).slice(0, 2).join(' '));
-    var frase = curto + ', falta a sua produção das ' + chamada.hora + ' e meia às ' + ((chamada.hora + 1) % 24) + ' e meia.' + (chamada.vezes[nome] > 1 ? ' Segunda chamada.' : '');
-    falar(frase);
+    var lista = pendentesReais();
+    if (!lista.length) return terminarRodada();
+    lista.forEach(function (n) { chamada.vezes[n] = chamada.rodada; });
+    var nomes = lista.map(nomeCurto);
+    var juntos = nomes.length > 1 ? nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1] : nomes[0];
+    falar((chamada.rodada > 1 ? 'Segunda chamada. ' : '') + 'Falta a produção ' + faixaFalada() + (nomes.length > 1 ? ' de: ' : ' de ') + juntos + '.');
     desenharChamada();
-    chamada.timer = setTimeout(semResposta, ESPERA);
-    var depois = chamada.fila[1];
-    planejar(ESPERA, (chamada.vezes[nome] < 2 ? 'Se não responder, ' + curto + ' vai para o fim da fila' : 'Se não responder, ' + curto + ' fica "não respondeu"') +
-      (depois && depois !== nome ? ' e chama ' + bonito(depois) : ''));
+    chamada.timer = setTimeout(fimDaEspera, ESPERA);
+    planejar(ESPERA, chamada.rodada > 1 ? 'Quem não responder fica "não respondeu"' : 'Quem não responder é chamado de novo');
   }
 
-  // Ninguém tocou em nada: primeira vez vai para o fim da fila; segunda vez fica "não respondeu" nesta hora.
-  function semResposta() {
+  // Acabaram os 2 minutos: primeira vez chama de novo quem falta; segunda vez, quem falta fica "não respondeu".
+  function fimDaEspera() {
+    conferirFila().then(function () {
+      if (!chamada.rodando) return;
+      if (chamada.rodada < 2 && pendentesReais().length) { chamada.rodada = 2; return falarRodada(); }
+      pendentesReais().forEach(function (n) { chamada.semResposta.push(n); responder(n, 'não respondeu'); });
+      chamada.fila = chamada.fila.filter(function (n) { return n === chamada.teste; });
+      terminarRodada();
+    });
+  }
+
+  // Todo mundo respondeu antes do tempo: termina a chamada.
+  function conferirFim() { if (chamada.rodando && !pendentesReais().length) terminarRodada(); }
+  function terminarRodada() {
     clearTimeout(chamada.timer);
-    var nome = chamada.fila.shift();
-    if (!nome) return proximaVez(0);
-    if (nome === chamada.teste) {
-      if (chamada.vezes[nome] < 2) { chamada.fila.unshift(nome); avisar('Teste: 2 minutos sem resposta. Chamando a segunda vez.'); falarVez(); return; }
-      chamada.teste = null; desenharChamada();
-      avisar('Teste: 2 chamadas sem resposta. De verdade, ficaria "não respondeu" nesta hora; com 2 horas assim no dia, falta.', 'Ok', function () { $('aviso').style.display = 'none'; }, 30000);
-      if (chamada.rodando) proximaVez(PAUSA);
-      return;
-    }
-    if (chamada.vezes[nome] < 2) chamada.fila.push(nome);
-    else { chamada.semResposta.push(nome); responder(nome, 'não respondeu'); }
+    if (chamada.rodando) { chamada.rodando = false; chamada.proximoTexto = ''; falar('Chamada terminada.'); }
+    desenharChamada(); mostrarProximo();
+  }
+
+  // Um nome só: "Chamar de novo" e o teste.
+  function falarVez(nome) {
+    nome = nome || chamada.fila[0];
+    if (!nome) return;
+    chamada.vezes[nome] = Math.max(1, chamada.vezes[nome] || 0);
+    falar(nomeCurto(nome) + ', falta a sua produção ' + faixaFalada() + '.');
     desenharChamada();
-    proximaVez(1000);
+  }
+
+  // Teste: chama a pessoa, espera 2 minutos, chama de novo e mostra o que aconteceria (nada vai para a planilha).
+  function testeSemResposta() {
+    var nome = chamada.teste;
+    if (!nome) return;
+    if (chamada.vezes[nome] < 2) {
+      chamada.vezes[nome] = 2; avisar('Teste: 2 minutos sem resposta. Chamando a segunda vez.');
+      falar(nomeCurto(nome) + ', falta a sua produção ' + faixaFalada() + '. Segunda chamada.');
+      chamada.timerTeste = setTimeout(testeSemResposta, ESPERA); desenharChamada(); return;
+    }
+    chamada.teste = null;
+    chamada.fila = chamada.fila.filter(function (n) { return n !== nome; });
+    desenharChamada();
+    avisar('Teste: 2 chamadas sem resposta. De verdade, ficaria "não respondeu" nesta hora; com 2 horas assim no dia, falta.', 'Ok', function () { $('aviso').style.display = 'none'; }, 30000);
   }
 
   // Na chamada sozinha, quem está no meio de um lançamento não é interrompido: só aparece um aviso.
@@ -674,7 +699,7 @@
     }
     desenharAgenda();
     var hora = horaPedida === undefined ? horaAgora() : horaPedida;
-    if (hora !== chamada.hora) { chamada.hora = hora; chamada.vezes = {}; chamada.semResposta = []; }
+    if (hora !== chamada.hora) { clearTimeout(chamada.timer); chamada.rodando = false; chamada.hora = hora; chamada.vezes = {}; chamada.semResposta = []; }
     $('chamadaFaixa').textContent = 'Procurando quem falta…';
     return chamar('apiChamada', chamada.hora).then(function (r) {
       chamada.faixa = r.faixa;
@@ -688,14 +713,17 @@
         avisar('Chamada: faltam ' + chamada.fila.length + ' na faixa ' + r.faixa + '.', 'Abrir', function () { tela('tChamada'); desenharChamada(); }, 60000);
       // Fala todo aparelho com "Chamar sozinho" ligado.
       desenharChamada();
-      // Chamada do horário: o primeiro nome sai 5 s depois do horário exato, igual em todos os aparelhos (a lista acabou de vir).
-      if (ligada() && chamada.fila.length && (auto || forcar || chamada.voltarFalando)) {
-        chamada.rodando = true;
-        if (auto && chamada.falarEm) proximaVez(Math.max(0, chamada.falarEm - Date.now()), true);
-        else proximaVez(chamada.voltarFalando ? PAUSA : 0);
+      // Chamada do horário: os nomes saem 5 s depois do horário exato, igual em todos os aparelhos (a lista acabou de vir).
+      // Voltar de um lançamento não recomeça a chamada: a espera de 2 minutos continua.
+      if (ligada() && pendentesReais().length && ((auto && chamada.falarEm) || forcar)) {
+        chamada.rodando = true; chamada.rodada = 1;
+        var ms = auto && chamada.falarEm ? Math.max(0, chamada.falarEm - Date.now()) : 0;
+        clearTimeout(chamada.timer);
+        chamada.timer = setTimeout(falarRodada, ms);
+        planejar(ms, 'Chama ' + (pendentesReais().length === 1 ? '1 pessoa' : pendentesReais().length + ' pessoas'));
       }
       chamada.falarEm = 0;
-      chamada.voltarFalando = false;
+      conferirFim();
     }).catch(function (e) { $('chamadaFaixa').textContent = mensagem(e); });
   }
 
@@ -716,22 +744,23 @@
       var a = el('div', 'acoes');
       var b1 = el('button', 'principal', 'Lançar agora');
       b1.onclick = function () {
-        clearTimeout(chamada.timer); window.speechSynthesis && window.speechSynthesis.cancel();
-        chamada.voltar = nome; chamada.voltarFalando = true;
-        estado.hora = chamada.hora; estado.horaManual = false; desenharFaixa();
+        chamada.voltar = nome;
+        // Fica na faixa da chamada (o relógio não troca a faixa enquanto a pessoa fala).
+        estado.hora = chamada.hora; estado.horaManual = true; desenharFaixa();
         if (!$('fala').value.trim()) $('fala').value = bonito(nome) + ' ';
         abrirLancar(); $('fala').focus();
       };
       var b2 = el('button', '', 'Nada nesta hora');
       b2.onclick = function () { respondeu(nome, 'nada', chamada.nada); };
       var b3 = el('button', '', 'Depois');
-      b3.onclick = semResposta;
+      // Depois: a pessoa vai para o fim da lista da tela (continua aguardando).
+      b3.onclick = function () { chamada.fila = chamada.fila.filter(function (x) { return x !== nome; }).concat([nome]); desenharChamada(); };
       var b4 = el('button', '', 'Não veio hoje');
       b4.onclick = function () { respondeu(nome, 'não veio', chamada.naoVieram); };
       a.appendChild(b1); a.appendChild(b2); a.appendChild(b3); a.appendChild(b4);
       c.appendChild(a);
       var rep = el('button', 'link', 'Chamar de novo');
-      rep.onclick = function () { chamada.vezes[nome] = Math.max(0, (chamada.vezes[nome] || 1) - 1); falarVez(); };
+      rep.onclick = function () { falarVez(nome); };
       c.appendChild(rep);
       vez.appendChild(c);
     } else {
@@ -749,7 +778,6 @@
         var d = el('div', 'linha'); d.appendChild(el('span', '', bonito(n))); d.appendChild(el('span', '', g[1]));
         // Tocar num nome que falta traz a pessoa para a vez (ex.: no celular, a pessoa responde por ela mesma).
         if (g[1] === 'aguardando' || g[1] === 'não respondeu') { d.style.cursor = 'pointer'; d.onclick = function () {
-          clearTimeout(chamada.timer);
           chamada.semResposta = chamada.semResposta.filter(function (x) { return x !== n; });
           chamada.fila = [n].concat(chamada.fila.filter(function (x) { return x !== n; })); desenharChamada(); window.scrollTo(0, 0);
         }; }
@@ -772,10 +800,11 @@
     chamada.teste = n; chamada.vezes[n] = 0;
     if (chamada.hora === null) chamada.hora = horaAgora();
     chamada.fila = [n].concat(chamada.fila.filter(function (x) { return x !== n; }));
-    desenharChamada(); window.scrollTo(0, 0);
-    falarVez();
+    window.scrollTo(0, 0);
+    falarVez(n);
+    clearTimeout(chamada.timerTeste); chamada.timerTeste = setTimeout(testeSemResposta, ESPERA);
   };
-  $('voltarChamada').onclick = function () { clearTimeout(chamada.timer); chamada.auto = false; chamada.rodando = false; abrirLancar(); };
+  $('voltarChamada').onclick = function () { abrirLancar(); };
 
   // Chamada sozinha: nos horários da chamada, com o app aberto.
   // Vem ligada ao abrir o app; só desliga se alguém desmarcar neste aparelho.
