@@ -47,8 +47,9 @@
   .opcoes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .opcoes button { border: 1px solid var(--linha); background: none; color: var(--texto); font: inherit; font-size: 14px;
     padding: 6px 12px; border-radius: 999px; cursor: pointer; }
-  select.trocar { margin-top: 6px; width: 100%; font: inherit; font-size: 15px; padding: 8px; border-radius: 10px;
+  select.trocar, input.trocar { margin-top: 6px; width: 100%; font: inherit; font-size: 15px; padding: 8px; border-radius: 10px;
     border: 1px solid var(--linha); background: var(--cartao); color: var(--texto); }
+  input.trocar { color-scheme: light dark; }
   .remover { float: right; border: 0; background: none; color: var(--ter); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 0 0 10px; }
   .geral { color: var(--texto); font-size: 14px; margin: 4px 4px 10px; }
   .geral:empty { display: none; }
@@ -146,10 +147,16 @@
   <div id="chamadaProximo" class="cartao" style="font-size:15px"></div>
   <div id="chamadaVez"></div>
   <div id="chamadaLista"></div>
-  <label class="chave"><span>Chamar sozinho aos 50 minutos de cada hora</span><input type="checkbox" id="chamarSozinho"></label>
+  <label class="chave"><span>Chamar sozinho nos horários da chamada</span><input type="checkbox" id="chamarSozinho"></label>
+  <div class="cartao">
+    <div style="font-weight:600">Horários da chamada</div>
+    <div id="agendaInfo" class="item"></div>
+    <div id="agendaLista" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
+    <div style="display:flex;gap:8px;margin-top:10px"><input type="time" id="agendaNova" class="trocar" style="margin:0;flex:1;min-width:0" value="09:50"><button id="agendaPor" class="pilula" style="flex-shrink:0">Adicionar</button></div>
+  </div>
   <div class="chave"><select id="voz" class="trocar" style="margin:0;flex:1;min-width:0"><option value="">Voz padrão do aparelho</option></select><button id="ouvirVoz" class="pilula" style="flex-shrink:0">Ouvir</button></div>
   <div class="chave"><select id="testeNome" class="trocar" style="margin:0;flex:1;min-width:0"></select><button id="testar" class="pilula" style="flex-shrink:0">Testar</button></div>
-  <div class="dica">Deixe o app aberto neste aparelho, com o som ligado. Cada resposta fica na aba Chamada da planilha. Ele fala, um de cada vez, o nome de quem está no horário e ainda não lançou a hora. O horário vem da aba Horários; quem não está lá, pelo costume das últimas 2 semanas.</div>
+  <div class="dica">Deixe o app aberto neste aparelho, com o som ligado. Cada resposta fica na aba Chamada da planilha. Nos horários da chamada, ele fala, um de cada vez, o nome de quem está no horário e ainda não lançou a hora; se ninguém estiver devendo, fica em silêncio. O horário vem da aba Horários; quem não está lá, pelo costume das últimas 2 semanas.</div>
 </div>
 
 <div id="aviso" class="aviso"><span id="avisoTexto"></span><button id="desfazer">Desfazer</button></div>
@@ -392,7 +399,7 @@
     estado.horaManual = false;
     $('fala').value = ''; guardar.tirar('rascunho'); estado.ajustes = {};
     atualizar();
-    if (chamada.voltar) { chamada.voltar = null; abrirChamada(chamada.auto); } else $('fala').focus();
+    if (chamada.voltar) { chamada.voltar = null; abrirChamada(chamada.auto, false, chamada.hora); } else $('fala').focus();
     enviarFila();
   }
 
@@ -612,8 +619,8 @@
     else if (chamada.rodando && chamada.proximoTexto) txt = chamada.proximoTexto + ' em ' + mmss;
     else if (chamada.mudo && chamada.fila.length) txt = 'Outro aparelho está comandando a chamada; este fala junto.';
     else {
-      var h = new Date(); var min = h.getMinutes();
-      txt = ligada() ? 'Próxima chamada automática às ' + ('0' + (min >= 50 ? (h.getHours() + 1) % 24 : h.getHours())).slice(-2) + ':50.' : 'Chamada automática desligada neste aparelho.';
+      var prox = proximaAgendada();
+      txt = ligada() ? 'Próxima chamada às ' + prox + ' (faixa ' + faixaTexto(horaDaAgenda(prox)) + ').' : 'Chamada automática desligada neste aparelho.';
     }
     caixa.textContent = 'Próximo passo: ' + txt;
   }
@@ -669,7 +676,7 @@
   }
 
   // Na chamada sozinha, quem está no meio de um lançamento não é interrompido: só aparece um aviso.
-  function abrirChamada(auto, forcar) {
+  function abrirChamada(auto, forcar, horaPedida) {
     if (forcar || !$('tLancar').classList.contains('ativa') || !$('fala').value.trim()) tela('tChamada');
     if (auto) chamada.auto = true;
     preencherVozes();
@@ -678,7 +685,8 @@
       sel.appendChild(el('option', '', 'Testar com…')).value = '';
       estado.dados.pessoas.forEach(function (p) { var o = el('option', '', bonito(p)); o.value = p; sel.appendChild(o); });
     }
-    var hora = horaAgora();
+    desenharAgenda();
+    var hora = horaPedida === undefined ? horaAgora() : horaPedida;
     if (hora !== chamada.hora) { chamada.hora = hora; chamada.vezes = {}; chamada.semResposta = []; }
     $('chamadaFaixa').textContent = 'Procurando quem falta…';
     return chamar('apiChamada', chamada.hora).then(function (r) {
@@ -801,12 +809,67 @@
   manterTelaAcesa();
   setInterval(function () {
     // Tela apagada (celular no bolso) não chama: fica para o aparelho que está à vista.
-    if (!estado.dados || !ligada() || escondidoNoCelular() || new Date().getMinutes() < 50) return;
-    var vez = hojeTexto() + ' ' + horaAgora();
+    if (!estado.dados || !ligada() || escondidoNoCelular()) return;
+    var devida = agendadaAgora();
+    if (!devida) return;
+    var vez = hojeTexto() + ' ' + devida;
     if (guardar.ler('ultimaChamada') === vez) return;
     guardar.por('ultimaChamada', vez);
-    abrirChamada(true);
+    abrirChamada(true, false, horaDaAgenda(devida));
   }, 20000);
+
+  // Horários da chamada (aba Agenda da chamada, iguais em todos os aparelhos). Sem nenhum: aos 50 minutos de cada hora.
+  function agenda() { return (estado.dados && estado.dados.agenda) || []; }
+  function minutos(h) { return Number(h.slice(0, 2)) * 60 + Number(h.slice(3)); }
+  function agoraMin() { var d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
+  function doisDigitos(n) { return ('0' + n).slice(-2); }
+  function horarios() {
+    var ag = agenda();
+    if (ag.length) return ag;
+    var todas = []; for (var x = 0; x < 24; x++) todas.push(doisDigitos(x) + ':50');
+    return todas;
+  }
+  // A chamada das 10:05 ainda cobra a faixa 09:00 – 10:00; a partir dos 30 minutos, cobra a hora em curso.
+  function horaDaAgenda(h) {
+    var x = Number(h.slice(0, 2)) + (Number(h.slice(3)) >= 30 ? 0 : -1);
+    return (x + (estado.ajusteHora || 0) + 48) % 24;
+  }
+  function faixaTexto(x) { return doisDigitos(x) + ':00 – ' + doisDigitos((x + 1) % 24) + ':00'; }
+  // O horário que está valendo agora: passou há menos de 30 minutos (o app aberto um pouco depois ainda chama).
+  function agendadaAgora() {
+    var m = agoraMin();
+    return horarios().filter(function (h) { return minutos(h) <= m && m - minutos(h) < 30; }).pop() || '';
+  }
+  function proximaAgendada() {
+    var m = agoraMin(), hs = horarios();
+    return hs.filter(function (h) { return minutos(h) > m; })[0] || hs[0];
+  }
+  function desenharAgenda() {
+    var ag = agenda(), lista = $('agendaLista');
+    lista.innerHTML = '';
+    $('agendaInfo').textContent = ag.length ? 'Chama nesses horários, só se alguém estiver devendo a produção.'
+      : 'Nenhum horário escolhido: chama aos 50 minutos de cada hora.';
+    ag.forEach(function (h) {
+      var b = el('button', 'pilula', h + '  ✕');
+      b.title = 'Tirar ' + h;
+      b.onclick = function () { salvarAgenda(ag.filter(function (x) { return x !== h; })); };
+      lista.appendChild(b);
+    });
+  }
+  function salvarAgenda(nova) {
+    $('agendaPor').disabled = true;
+    chamar('apiSalvarAgenda', nova).then(function (r) {
+      estado.dados.agenda = r; desenharAgenda(); mostrarProximo();
+      avisar(r.length ? 'Horários da chamada: ' + r.join(', ') + '.' : 'Sem horários: chama aos 50 minutos de cada hora.');
+    }).catch(function (e) { avisar(mensagem(e)); })
+      .then(function () { $('agendaPor').disabled = false; });
+  }
+  $('agendaPor').onclick = function () {
+    var v = $('agendaNova').value;
+    if (!/^\d{2}:\d{2}$/.test(v)) { avisar('Escolha um horário, por exemplo 09:50.'); return; }
+    if (agenda().indexOf(v) >= 0) { avisar(v + ' já está na lista.'); return; }
+    salvarAgenda(agenda().concat([v]));
+  };
 
   iniciar();
 })();

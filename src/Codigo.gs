@@ -10,11 +10,12 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.8.5';
+var VERSAO = '1.9.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
 var CHAMADA_ABA = 'Chamada';
+var AGENDA_ABA = 'Agenda da chamada';
 var CHAMADA_CABECALHO = ['QUANDO', 'DATA', 'FAIXA', 'PESSOA', 'RESPOSTA'];
 var RESPOSTAS = ['lançou', 'nada', 'não veio', 'não respondeu'];
 var LOG_CABECALHO = ['ID', 'QUANDO', 'QUEM LANÇOU', 'O QUE FOI FALADO', 'LINHAS', 'DESFEITO EM'];
@@ -237,6 +238,7 @@ function apiInicio() {
     categorias: l.categorias,
     apelidos: apelidos_(ss, l),
     comHorario: Object.keys(horarios_(ss, l)).length,
+    agenda: agenda_(ss),
     supervisores: l.supervisores,
     maximos: maximos_(ss),
     habitos: h.habitos,
@@ -474,6 +476,60 @@ function horarios_(ss, l) {
   });
   if (mudou) aba.getRange(2, 4, situacao.length, 1).setValues(situacao);
   return mapa;
+}
+
+// Agenda da chamada (aba opcional): uma hora por linha na coluna A. Vazia = chama aos 50 minutos de cada hora.
+// Devolve as horas em "HH:MM", em ordem e sem repetir.
+function horaAgenda_(v) {
+  var m = String(v).match(/^\s*(\d{1,2})\s*(?:[:h]\s*(\d{2}))?/);
+  if (!m || Number(m[1]) > 23 || Number(m[2] || 0) > 59) return '';
+  return ('0' + m[1]).slice(-2) + ':' + ('0' + Number(m[2] || 0)).slice(-2);
+}
+function agenda_(ss) {
+  var aba = abaPorNome_(ss, AGENDA_ABA);
+  if (!aba || aba.getLastRow() < 2) return [];
+  var lista = [];
+  aba.getRange(2, 1, aba.getLastRow() - 1, 1).getDisplayValues().forEach(function (r) {
+    var h = horaAgenda_(r[0]);
+    if (h && lista.indexOf(h) < 0) lista.push(h);
+  });
+  return lista.sort();
+}
+// Faixa que a chamada de um horário cobra: da hora em curso a partir dos 30 minutos; antes disso, a hora anterior.
+function faixaDaAgenda_(h) {
+  var hora = Number(h.slice(0, 2)), min = Number(h.slice(3));
+  var x = min >= 30 ? hora : (hora + 23) % 24;
+  return ('0' + x).slice(-2) + ':00 – ' + ('0' + (x + 1) % 24).slice(-2) + ':00';
+}
+
+function apiSalvarAgenda(lista) {
+  var ss = abrir_(config_());
+  var horas = [];
+  (lista || []).forEach(function (v) {
+    var h = horaAgenda_(v);
+    if (!h) throw new Error('Horário inválido: ' + v + ' (use 09:50).');
+    if (horas.indexOf(h) < 0) horas.push(h);
+  });
+  horas.sort();
+  var trava = LockService.getScriptLock();
+  trava.waitLock(20000);
+  try {
+    var aba = abaPorNome_(ss, AGENDA_ABA);
+    if (!aba) {
+      aba = ss.insertSheet(AGENDA_ABA, ss.getSheets().length);
+      aba.getRange(1, 1, 1, 2).setValues([['HORÁRIO DA CHAMADA', 'COBRA A FAIXA']]);
+      aba.setFrozenRows(1);
+    }
+    var antes = Math.max(0, aba.getLastRow() - 1);
+    var linhas = horas.map(function (h) { return [h, faixaDaAgenda_(h)]; });
+    while (linhas.length < antes) linhas.push(['', '']);
+    if (linhas.length) {
+      var r = aba.getRange(2, 1, linhas.length, 2);
+      r.setNumberFormat('@');
+      r.setValues(linhas);
+    }
+  } finally { trava.releaseLock(); }
+  return horas;
 }
 
 // Horário pelo costume: horas em que a pessoa lançou em pelo menos 2 dias e em 40% dos dias que trabalhou (últimos 14 dias).

@@ -228,3 +228,16 @@ test('anúncio da chamada vale para todos os aparelhos', () => {
   assert.strictEqual(lido.anuncio.id, r.anuncio.id);
   assert.ok(lido.anuncio.falarEm > r.agora);
 });
+
+test('agenda da chamada: salva na aba, em ordem, e volta no início', () => {
+  const p = planilha();
+  const s = carregarServidor(p);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().agenda)), []);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiSalvarAgenda(['16:50', '9:50', '10h05', '09:50']))), ['09:50', '10:05', '16:50']);
+  const ag = p.getSheetByName('Agenda da chamada').dados;
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(ag.slice(1))), [['09:50', '09:00 – 10:00'], ['10:05', '09:00 – 10:00'], ['16:50', '16:00 – 17:00']]);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().agenda)), ['09:50', '10:05', '16:50']);
+  s.apiSalvarAgenda(['11:50']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().agenda)), ['11:50'], 'tirar um horário apaga a linha');
+  assert.throws(() => s.apiSalvarAgenda(['25:00']), /inválido/);
+});
