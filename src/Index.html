@@ -576,11 +576,10 @@
       if ($('tChamada').classList.contains('ativa')) conferirFila();
     }).catch(function () {});
   }
-  // Consulta rápida (2 s) perto dos 50 minutos ou logo depois de um anúncio; no resto da hora, a cada 30 s.
+  // Consulta a cada 2 s, para todos falarem juntos mesmo quando alguém aperta Chamada fora dos 50 minutos.
   var ultimaConsulta = 0;
   setInterval(function () {
-    var min = new Date().getMinutes(), perto = min >= 49 || Date.now() - anuncio.quando < 180000;
-    if (Date.now() - ultimaConsulta < (perto ? 2000 : 30000)) return;
+    if (Date.now() - ultimaConsulta < 2000) return;
     ultimaConsulta = Date.now();
     ouvirAnuncio();
   }, 1000);
