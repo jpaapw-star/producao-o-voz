@@ -194,7 +194,7 @@
       // Diferença entre o relógio do servidor e o do aparelho, para a faixa seguir a hora certa.
       estado.ajusteHora = d.hora - new Date().getHours();
       abrirLancar();
-      mostrarFila(); enviarFila();
+      mostrarFila(); enviarFila(); pedirToqueParaSom();
     }).catch(function (e) {
       tela('tErro'); $('erroInicio').textContent = mensagem(e);
     });
@@ -566,7 +566,7 @@
     }).catch(function () { falar(texto); });
   }
   function ouvirAnuncio() {
-    if (!estado.dados || !ligada() || document.hidden || chamada.rodando) return;
+    if (!estado.dados || !ligada() || escondidoNoCelular() || chamada.rodando) return;
     var t0 = Date.now();
     chamar('apiAnuncio').then(function (r) {
       acertarRelogio(r.agora, t0);
@@ -666,12 +666,11 @@
       chamada.fila = r.faltam.filter(function (n) { return naFila.indexOf(n) < 0 && chamada.semResposta.indexOf(n) < 0; })
         .sort(function (x, y) { return (chamada.vezes[x] || 0) - (chamada.vezes[y] || 0); });
       guardarListas(r);
-      if (!$('tChamada').classList.contains('ativa')) {
-        if (chamada.fila.length) avisar('Chamada: faltam ' + chamada.fila.length + ' na faixa ' + r.faixa + '.', 'Abrir', function () { abrirChamada(true, true); }, 60000);
-        return;
-      }
+      // A chamada fala mesmo com outra tela aberta; quem está lançando só vê um aviso para abrir.
+      if (!$('tChamada').classList.contains('ativa') && chamada.fila.length)
+        avisar('Chamada: faltam ' + chamada.fila.length + ' na faixa ' + r.faixa + '.', 'Abrir', function () { tela('tChamada'); desenharChamada(); }, 60000);
       // Só fala o aparelho com "Chamar sozinho" ligado, e só um por hora (o primeiro que pede). Os outros ficam em silêncio.
-      var pedir = ligada() ? chamar('apiChamador', aparelho, chamada.hora) : Promise.resolve(false);
+      var pedir = ligada() ? chamar('apiChamador', aparelho, chamada.hora, !!forcar) : Promise.resolve(false);
       return pedir.then(function (ok) {
         chamada.mudo = !ok;
         desenharChamada();
@@ -684,7 +683,7 @@
   function desenharChamada() {
     var faltam = chamada.fila.length;
     $('chamadaFaixa').textContent = 'Faixa ' + chamada.faixa + ' · ' +
-      (faltam ? (faltam === 1 ? 'falta 1' : 'faltam ' + faltam) : (chamada.feitos.length + chamada.nada.length + chamada.naoVieram.length + chamada.semResposta.length ? 'chamada terminada' : 'ninguém no horário')) +
+      (faltam ? (faltam === 1 ? '1 aguardando' : faltam + ' aguardando') : (chamada.feitos.length + chamada.nada.length + chamada.naoVieram.length + chamada.semResposta.length ? 'chamada terminada' : 'ninguém no horário')) +
       (chamada.feitos.length ? ' · ' + chamada.feitos.length + (chamada.feitos.length === 1 ? ' já lançou' : ' já lançaram') : '') +
       (chamada.nada.length ? ' · ' + chamada.nada.length + ' sem produção' : '') +
       (chamada.mudo ? ' · em silêncio neste aparelho (toque no seu nome para responder)' : '');
@@ -725,12 +724,12 @@
     }
     var lista = $('chamadaLista'); lista.innerHTML = '';
     var l = el('div', 'lista');
-    [[chamada.fila.slice(1), 'falta'], [chamada.semResposta, 'não respondeu'], [chamada.feitos, 'lançou'], [chamada.nada, 'nada nesta hora'],
+    [[chamada.fila.slice(1), 'aguardando'], [chamada.semResposta, 'não respondeu'], [chamada.feitos, 'lançou'], [chamada.nada, 'nada nesta hora'],
       [chamada.naoVieram, 'não veio'], [chamada.faltas, 'falta no dia']].forEach(function (g) {
       g[0].forEach(function (n) {
         var d = el('div', 'linha'); d.appendChild(el('span', '', bonito(n))); d.appendChild(el('span', '', g[1]));
         // Tocar num nome que falta traz a pessoa para a vez (ex.: no celular, a pessoa responde por ela mesma).
-        if (g[1] === 'falta' || g[1] === 'não respondeu') { d.style.cursor = 'pointer'; d.onclick = function () {
+        if (g[1] === 'aguardando' || g[1] === 'não respondeu') { d.style.cursor = 'pointer'; d.onclick = function () {
           clearTimeout(chamada.timer);
           chamada.semResposta = chamada.semResposta.filter(function (x) { return x !== n; });
           chamada.fila = [n].concat(chamada.fila.filter(function (x) { return x !== n; })); desenharChamada(); window.scrollTo(0, 0);
@@ -757,6 +756,15 @@
   // Chamada sozinha: uma vez por hora, a partir dos 50 minutos, com o app aberto.
   // Vem ligada ao abrir o app; só desliga se alguém desmarcar neste aparelho.
   function ligada() { return guardar.ler('chamarSozinho') !== '0'; }
+  // No computador a chamada fala mesmo com a aba do navegador em segundo plano; no celular, só com a tela à vista.
+  var celular = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+  function escondidoNoCelular() { return celular && document.hidden; }
+  // O navegador só deixa falar depois de um toque na página: pede esse toque uma vez ao abrir.
+  function pedirToqueParaSom() {
+    try { if (navigator.userActivation && navigator.userActivation.hasBeenActive) return; } catch (e) {}
+    if (!ligada()) return;
+    avisar('Toque aqui para ligar a voz da chamada neste aparelho.', 'Ligar', function () { falar('Voz da chamada ligada.'); $('aviso').style.display = 'none'; }, 600000);
+  }
   var travaTela = null;
   function manterTelaAcesa() {
     // Tela acesa só no computador; no celular gastaria bateria.
@@ -771,7 +779,7 @@
   manterTelaAcesa();
   setInterval(function () {
     // Tela apagada (celular no bolso) não chama: fica para o aparelho que está à vista.
-    if (!estado.dados || !ligada() || document.hidden || new Date().getMinutes() < 50) return;
+    if (!estado.dados || !ligada() || escondidoNoCelular() || new Date().getMinutes() < 50) return;
     var vez = hojeTexto() + ' ' + horaAgora();
     if (guardar.ler('ultimaChamada') === vez) return;
     guardar.por('ultimaChamada', vez);

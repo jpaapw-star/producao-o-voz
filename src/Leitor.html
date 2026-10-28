@@ -267,7 +267,8 @@
     defeitos: ['defeito', 'defeitos', 'defeituoso', 'defeituosos']
   };
   var TIPO_OUVIDO = { efeito: 'defeitos', efeitos: 'defeitos', perfeito: 'defeitos', perfeitos: 'defeitos',
-    refeito: 'defeitos', desfeito: 'defeitos', estado: 'testados', estados: 'testados', textado: 'testados', textados: 'testados' };
+    refeito: 'defeitos', desfeito: 'defeitos', estado: 'testados', estados: 'testados', textado: 'testados', textados: 'testados',
+    atualizado: 'finalizados', atualizados: 'finalizados', atualizada: 'finalizados', atualizadas: 'finalizados' };
   function tipoDe(p) {
     for (var i = 0; i < TIPOS.length; i++) if (TIPOS[i].re.test(p)) return TIPOS[i].campo;
     return null;
@@ -490,6 +491,19 @@
         }
       }
       eventos = aplicarCorrecoes(eventos);
+      // Duas categorias coladas ("controle nintendo"): a primeira é o produto e a segunda só diz de quê.
+      // Se a segunda é a mesma coisa mais detalhada ("fone com fone de ouvido"), fica a segunda.
+      eventos = eventos.filter(function (e, k) {
+        var ant = eventos[k - 1], prox = eventos[k + 1];
+        var cat = function (x) { return x && x.e === 'cat' && !x.desconhecida && x.alvos.length; };
+        var contem = function (a, b) {
+          var pa = normalizar(a.alvos[0]).split(' '), pb = normalizar(b.alvos[0]).split(' ');
+          return pb.length > pa.length && pa.every(function (w) { return pb.indexOf(w) >= 0; });
+        };
+        if (cat(e) && cat(prox) && contem(e, prox)) return false;
+        if (cat(e) && cat(ant) && !contem(ant, e)) return false;
+        return true;
+      });
       // "quarto", "dose" só são número se vier categoria ou tipo logo depois.
       eventos = eventos.filter(function (e, k) {
         if (e.e !== 'num' || !e.parecido) return true;
@@ -562,7 +576,11 @@
       function estiloDesde(i) {
         for (var j = i; j < eventos.length && eventos[j].e !== 'pessoa'; j++) {
           if (eventos[j].e === 'num') return 'numero';
-          if (eventos[j].e === 'tipo') return 'tipo';
+          // "fone finalizado, uma antena finalizada": o "uma" é da antena, não do fone; o estilo continua "número antes".
+          if (eventos[j].e === 'tipo') {
+            var n1 = eventos[j + 1], n2 = eventos[j + 2];
+            return n1 && n1.e === 'num' && n1.fraco && n2 && n2.e === 'cat' ? 'numero' : 'tipo';
+          }
         }
         return 'numero';
       }
@@ -626,6 +644,10 @@
           if (antes && antes.e === 'tipo' && antes.usado && !ev.parecido) {
             ev.usado = true; ev.valor = antes.valor;
             somar(garantir(), ev.campo, antes.valor);
+          } else if (antes && antes.e === 'cat' && !antes.desconhecida && atual && !atual.temQtd) {
+            // "fone de ouvido finalizado" sem número: é um.
+            ev.usado = true; ev.valor = 1;
+            somar(atual, ev.campo, 1);
           }
         }
       });
