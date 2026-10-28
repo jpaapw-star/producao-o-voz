@@ -33,4 +33,5 @@ Mande o link. Não tem senha: quem tem o link pode lançar. No iPhone: abra no S
 - Ele só **acrescenta linhas** na aba Registros, no mesmo formato da linha de cima. Ele não mexe nas outras abas nem no app que já existe.
 - Quem lançou cada coisa fica na aba **Lançamentos por voz** (criada sozinha).
 - Apelidos e siglas ficam na aba **Apelidos** (criada sozinha): coluna A o apelido ("Gabi", "PS5"), coluna B o nome ou a categoria igual à aba Configurações. Vale na próxima vez que o app abrir (ou em até 10 minutos). A coluna C mostra "ok" ou o que está errado na linha.
+- **Chamada**: o botão Chamada fala, um de cada vez, o nome de quem está no horário e ainda não lançou a hora. Ligue "Chamar sozinho aos 50 minutos" num aparelho que fica aberto (PC da sala). O horário de cada um vem da aba **Horários** (criada sozinha: PESSOA, ENTRADA, SAÍDA; pode ter duas linhas para manhã e tarde; a coluna D mostra "ok" ou o erro). Quem não está na aba é chamado pelo costume das últimas 2 semanas. Supervisores não são chamados.
 - O segredo antigo `CODIGO_EQUIPE` não é mais usado e pode ser apagado.

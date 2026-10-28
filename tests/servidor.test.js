@@ -158,3 +158,35 @@ test('mês que aparece como número (46296) volta a ser "Outubro/2026"', () => {
   assert.strictEqual(reg.dados[4][0], 'Outubro/2026');
   assert.match(String(reg.dados[5][0]), /^[A-ZÇ][a-zç]+\/\d{4}$/);
 });
+
+test('chamada chama só quem trabalha naquela hora (costume ou aba Horários), sem supervisores', () => {
+  const p = planilha();
+  p.getSheetByName('Configurações').dados[1][1] = 'SUPERVISORA';
+  const reg = p.getSheetByName('Registros').dados;
+  const dia = (n) => new Date(Date.now() - n * 864e5);
+  [1, 2, 3].forEach((n) => {
+    reg.push(['Outubro/2026', dia(n), '10:10', 'DANIEL VARGAS', 'CAIXA DE SOM', 0, 2, 0, '10:00', '11:00']);
+    reg.push(['Outubro/2026', dia(n), '14:10', 'JULIA GOMES', 'ROTEADOR', 2, 0, 0, '14:00', '15:00']);
+    reg.push(['Outubro/2026', dia(n), '10:10', 'ANA LEAL', 'NOTEBOOK', 2, 0, 0, '10:00', '11:00']);
+  });
+  const s = carregarServidor(p);
+  let c = JSON.parse(JSON.stringify(s.apiChamada(10)));
+  assert.strictEqual(c.faixa, '10:00 – 11:00');
+  assert.deepStrictEqual(c.faltam, ['DANIEL VARGAS']);
+  assert.ok(p.getSheetByName('Horários'), 'cria a aba Horários');
+
+  reg.push(['Outubro/2026', new Date(), '10:20', 'DANIEL VARGAS', 'CAIXA DE SOM', 0, 2, 0, '10:00', '11:00']);
+  c = JSON.parse(JSON.stringify(s.apiChamada(10)));
+  assert.deepStrictEqual(c.faltam, []);
+  assert.deepStrictEqual(c.feitos, ['DANIEL VARGAS']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(14))).faltam, ['JULIA GOMES']);
+
+  const hor = p.getSheetByName('Horários').dados;
+  hor.push(['julia gomes', '10:00', '12:00']);
+  hor.push(['FULANO', '08:00', '12:00']);
+  c = JSON.parse(JSON.stringify(s.apiChamada(10)));
+  assert.deepStrictEqual(c.faltam, ['JULIA GOMES']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(14))).faltam, [], 'a aba vale mais que o costume');
+  assert.strictEqual(hor[1][3], 'ok');
+  assert.match(hor[2][3], /não achei/);
+});
