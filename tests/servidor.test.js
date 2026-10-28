@@ -256,3 +256,12 @@ test('faixas de meia em meia hora: 07:30 – 08:30; lançamento antigo em hora c
   const r = s.apiGravar({ quem: 'ANA LEAL', hora: 7, linhas: [{ pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', testados: 1 }] });
   assert.strictEqual(r.faixa, '07:30 – 08:30');
 });
+
+test('vários aparelhos: "não respondeu" da mesma pessoa e faixa entra uma vez só', () => {
+  const p = planilha();
+  const s = carregarServidor(p);
+  s.apiResposta({ pessoa: 'JULIA GOMES', hora: 9, resposta: 'não respondeu' });
+  s.apiResposta({ pessoa: 'JULIA GOMES', hora: 9, resposta: 'não respondeu' });
+  const linhas = p.getSheetByName('Chamada').dados.slice(1).filter((r) => r[4] === 'não respondeu');
+  assert.strictEqual(linhas.length, 1);
+});
