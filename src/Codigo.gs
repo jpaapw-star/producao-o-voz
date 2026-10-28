@@ -14,6 +14,9 @@ var VERSAO = '1.7.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
+var CHAMADA_ABA = 'Chamada';
+var CHAMADA_CABECALHO = ['QUANDO', 'DATA', 'FAIXA', 'PESSOA', 'RESPOSTA'];
+var RESPOSTAS = ['lançou', 'nada', 'não veio', 'não respondeu'];
 var LOG_CABECALHO = ['ID', 'QUANDO', 'QUEM LANÇOU', 'O QUE FOI FALADO', 'LINHAS', 'DESFEITO EM'];
 var LINHAS_HISTORICO = 3000;
 var MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro',
@@ -523,11 +526,51 @@ function apiChamada(hora) {
       if (m && ('0' + m[1]).slice(-2) + ':' + m[2] === f.inicio) feitos[semAcento_(r[col.pessoa])] = true;
     });
   }
+  // Respostas de hoje na aba Chamada: "nada" vale para a faixa; "não veio" vale para o dia todo.
+  var nada = {}, foraHoje = {};
+  var cham = ss.getSheetByName(CHAMADA_ABA);
+  if (cham && cham.getLastRow() > 1) {
+    var hojeIso = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+    var n = cham.getLastRow(), ini = Math.max(2, n - 500);
+    cham.getRange(ini, 1, n - ini + 1, CHAMADA_CABECALHO.length).getDisplayValues().forEach(function (r) {
+      if (dataTexto_(r[1], tz) !== hojeIso) return;
+      var p = semAcento_(r[3]);
+      if (r[4] === 'não veio') foraHoje[p] = true;
+      if (r[4] === 'nada' && String(r[2]).indexOf(f.inicio) === 0) nada[p] = true;
+    });
+  }
+  var lista = function (teste) { return ativos.filter(function (p) { return teste(semAcento_(p)); }).sort(); };
   return {
     faixa: f.inicio + ' – ' + f.fim,
-    faltam: ativos.filter(function (p) { return !feitos[semAcento_(p)]; }).sort(),
-    feitos: ativos.filter(function (p) { return feitos[semAcento_(p)]; }).sort()
+    faltam: lista(function (p) { return !feitos[p] && !nada[p] && !foraHoje[p]; }),
+    feitos: lista(function (p) { return feitos[p]; }),
+    nada: lista(function (p) { return !feitos[p] && nada[p]; }),
+    naoVieram: lista(function (p) { return !feitos[p] && !nada[p] && foraHoje[p]; })
   };
+}
+
+// Guarda a resposta de cada nome chamado na aba Chamada, para ver depois se a chamada funciona.
+function apiResposta(pedido) {
+  var cfg = config_();
+  var ss = abrir_(cfg);
+  var tz = ss.getSpreadsheetTimeZone();
+  var l = listas_(ss);
+  var oficial = {};
+  l.pessoas.forEach(function (x) { oficial[semAcento_(x)] = x; });
+  var pessoa = oficial[semAcento_(pedido && pedido.pessoa)];
+  if (!pessoa) throw new Error('Pessoa não está em Configurações.');
+  if (RESPOSTAS.indexOf(pedido.resposta) < 0) throw new Error('Resposta inválida.');
+  var f = faixa_(pedido.hora);
+  var aba = ss.getSheetByName(CHAMADA_ABA);
+  if (!aba) {
+    aba = ss.insertSheet(CHAMADA_ABA, ss.getSheets().length);
+    aba.appendRow(CHAMADA_CABECALHO);
+    aba.setFrozenRows(1);
+  }
+  var agora = new Date();
+  aba.appendRow([Utilities.formatDate(agora, tz, 'HH:mm'), Utilities.formatDate(agora, tz, 'dd/MM/yyyy'),
+    f.inicio + ' – ' + f.fim, pessoa, pedido.resposta]);
+  return true;
 }
 
 function apiHoje(quem) {

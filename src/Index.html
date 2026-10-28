@@ -85,8 +85,8 @@
   .vez { text-align: center; padding: 26px 16px 18px; }
   .vez .grande { font-size: 30px; font-weight: 700; letter-spacing: -0.4px; }
   .vez .item { margin-top: 6px; }
-  .acoes { display: flex; gap: 8px; margin-top: 18px; }
-  .acoes button { flex: 1; border: 0; border-radius: 12px; background: var(--campo); color: var(--texto); font: inherit;
+.acoes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 18px; }
+  .acoes button { border: 0; border-radius: 12px; background: var(--campo); color: var(--texto); font: inherit;
     font-size: 15px; font-weight: 600; padding: 12px 8px; cursor: pointer; }
   .acoes button.principal { background: var(--botao); color: var(--botao-texto); }
   .lista .linha { display: flex; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--linha); }
@@ -145,7 +145,7 @@
   <div id="chamadaVez"></div>
   <div id="chamadaLista"></div>
   <label class="chave"><span>Chamar sozinho aos 50 minutos de cada hora</span><input type="checkbox" id="chamarSozinho"></label>
-  <div class="dica">Deixe o app aberto neste aparelho, com o som ligado. Ele fala, um de cada vez, o nome de quem está no horário e ainda não lançou a hora. O horário vem da aba Horários; quem não está lá, pelo costume das últimas 2 semanas.</div>
+  <div class="dica">Deixe o app aberto neste aparelho, com o som ligado. Cada resposta fica na aba Chamada da planilha. Ele fala, um de cada vez, o nome de quem está no horário e ainda não lançou a hora. O horário vem da aba Horários; quem não está lá, pelo costume das últimas 2 semanas.</div>
 </div>
 
 <div id="aviso" class="aviso"><span id="avisoTexto"></span><button id="desfazer">Desfazer</button></div>
@@ -377,7 +377,7 @@
       $('fala').value = ''; guardar.tirar('rascunho'); estado.ajustes = {};
       atualizar();
       avisar('Gravado: ' + r.n + (r.n === 1 ? ' linha' : ' linhas') + ' · ' + r.faixa, 'Desfazer', desfazer, 15000);
-      if (chamada.voltar) { chamada.voltar = false; abrirChamada(chamada.auto); }
+      if (chamada.voltar) { responder(chamada.voltar, 'lançou'); chamada.voltar = null; abrirChamada(chamada.auto); }
     }).catch(function (e) {
       estado.gravando = false; desenhar();
       avisar('Não gravou: ' + mensagem(e));
@@ -444,15 +444,22 @@
   $('voltarHoje').onclick = function () { tela('tLancar'); };
 
   /* ---------- chamada ---------- */
-  var chamada = { fila: [], feitos: [], hora: null, faixa: '', auto: false, voltar: false, rodada: 0, timer: null };
+  var chamada = { fila: [], feitos: [], nada: [], naoVieram: [], hora: null, faixa: '', auto: false, voltar: null, rodada: 0, timer: null, semResposta: {} };
   var bonito = function (n) { return String(n).toLowerCase().replace(/(^|\s)(\S)/g, function (m, a, c) { return a + c.toUpperCase(); }); };
   function hojeTexto() { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
 
-  // "Não veio hoje" vale só para o dia, neste aparelho.
-  function ausentes() {
-    try { var a = JSON.parse(guardar.ler('ausentes') || '{}'); return a.dia === hojeTexto() ? a.nomes : []; } catch (e) { return []; }
+  // Cada resposta vai para a aba Chamada da planilha.
+  function responder(nome, resposta) {
+    chamar('apiResposta', { pessoa: nome, hora: chamada.hora, resposta: resposta }).catch(function (e) { avisar('Não guardou a resposta: ' + mensagem(e)); });
   }
-  function marcarAusente(nome) { guardar.por('ausentes', JSON.stringify({ dia: hojeTexto(), nomes: ausentes().concat([nome]) })); }
+  function tirarDaFila(nome, resposta, lista) {
+    clearTimeout(chamada.timer);
+    responder(nome, resposta);
+    chamada.fila = chamada.fila.filter(function (n) { return n !== nome; });
+    lista.push(nome);
+    desenharChamada();
+    if (chamada.fila.length) chamarVez(); else falar('Chamada terminada.');
+  }
 
   function falar(texto) {
     try {
@@ -475,6 +482,7 @@
   function proximo(falarAgora) {
     var nome = chamada.fila.shift();
     if (nome) { chamada.fila.push(nome); chamada.rodada++; }
+    if (nome && !falarAgora && !chamada.semResposta[nome + chamada.hora]) { chamada.semResposta[nome + chamada.hora] = true; responder(nome, 'não respondeu'); }
     if (chamada.auto && chamada.rodada >= chamada.fila.length) chamada.auto = false;
     desenharChamada();
     if (chamada.auto || falarAgora) chamarVez();
@@ -488,10 +496,9 @@
     $('chamadaFaixa').textContent = 'Procurando quem falta…';
     $('chamadaVez').innerHTML = ''; $('chamadaLista').innerHTML = '';
     return chamar('apiChamada', chamada.hora).then(function (r) {
-      var fora = ausentes();
       chamada.faixa = r.faixa;
-      chamada.fila = r.faltam.filter(function (n) { return fora.indexOf(n) < 0; });
-      chamada.feitos = r.feitos;
+      chamada.fila = r.faltam;
+      chamada.feitos = r.feitos; chamada.nada = r.nada || []; chamada.naoVieram = r.naoVieram || [];
       if (!$('tChamada').classList.contains('ativa')) {
         if (chamada.fila.length) avisar('Chamada: faltam ' + chamada.fila.length + ' na faixa ' + r.faixa + '.', 'Abrir', function () { abrirChamada(true, true); }, 60000);
         return;
@@ -506,7 +513,8 @@
     var faltam = chamada.fila.length;
     $('chamadaFaixa').textContent = 'Faixa ' + chamada.faixa + ' · ' +
       (faltam ? (faltam === 1 ? 'falta 1' : 'faltam ' + faltam) : 'todo mundo lançou') +
-      (chamada.feitos.length ? ' · ' + chamada.feitos.length + (chamada.feitos.length === 1 ? ' já lançou' : ' já lançaram') : '');
+      (chamada.feitos.length ? ' · ' + chamada.feitos.length + (chamada.feitos.length === 1 ? ' já lançou' : ' já lançaram') : '') +
+      (chamada.nada.length ? ' · ' + chamada.nada.length + ' sem produção' : '');
     var vez = $('chamadaVez'); vez.innerHTML = '';
     if (faltam) {
       var nome = chamada.fila[0];
@@ -517,16 +525,18 @@
       var b1 = el('button', 'principal', 'Lançar agora');
       b1.onclick = function () {
         clearTimeout(chamada.timer); window.speechSynthesis && window.speechSynthesis.cancel();
-        chamada.voltar = true; chamada.voltarFalando = true;
+        chamada.voltar = nome; chamada.voltarFalando = true;
         estado.hora = chamada.hora; estado.horaManual = false; desenharFaixa();
         if (!$('fala').value.trim()) $('fala').value = bonito(nome) + ' ';
         abrirLancar(); $('fala').focus();
       };
-      var b2 = el('button', '', 'Depois');
-      b2.onclick = function () { proximo(true); };
-      var b3 = el('button', '', 'Não veio hoje');
-      b3.onclick = function () { marcarAusente(nome); chamada.fila.shift(); desenharChamada(); if (chamada.fila.length) chamarVez(); };
-      a.appendChild(b1); a.appendChild(b2); a.appendChild(b3);
+      var b2 = el('button', '', 'Nada nesta hora');
+      b2.onclick = function () { tirarDaFila(nome, 'nada', chamada.nada); };
+      var b3 = el('button', '', 'Depois');
+      b3.onclick = function () { proximo(true); };
+      var b4 = el('button', '', 'Não veio hoje');
+      b4.onclick = function () { tirarDaFila(nome, 'não veio', chamada.naoVieram); };
+      a.appendChild(b1); a.appendChild(b2); a.appendChild(b3); a.appendChild(b4);
       c.appendChild(a);
       var rep = el('button', 'link', 'Chamar de novo');
       rep.onclick = chamarVez;
@@ -538,12 +548,11 @@
       vez.firstChild.appendChild(el('div', 'item', 'Todo mundo lançou a faixa ' + chamada.faixa + '.'));
     }
     var lista = $('chamadaLista'); lista.innerHTML = '';
-    if (faltam > 1 || chamada.feitos.length) {
-      var l = el('div', 'lista');
-      chamada.fila.slice(1).forEach(function (n) { var d = el('div', 'linha'); d.appendChild(el('span', '', bonito(n))); d.appendChild(el('span', '', 'falta')); l.appendChild(d); });
-      chamada.feitos.forEach(function (n) { var d = el('div', 'linha'); d.appendChild(el('span', '', bonito(n))); d.appendChild(el('span', '', 'lançou')); l.appendChild(d); });
-      lista.appendChild(l);
-    }
+    var l = el('div', 'lista');
+    [[chamada.fila.slice(1), 'falta'], [chamada.feitos, 'lançou'], [chamada.nada, 'nada nesta hora'], [chamada.naoVieram, 'não veio']].forEach(function (g) {
+      g[0].forEach(function (n) { var d = el('div', 'linha'); d.appendChild(el('span', '', bonito(n))); d.appendChild(el('span', '', g[1])); l.appendChild(d); });
+    });
+    if (l.childNodes.length) lista.appendChild(l);
   }
 
   $('abrirChamada').onclick = function () { abrirChamada(false, true); };

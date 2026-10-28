@@ -189,4 +189,17 @@ test('chamada chama só quem trabalha naquela hora (costume ou aba Horários), s
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(14))).faltam, [], 'a aba vale mais que o costume');
   assert.strictEqual(hor[1][3], 'ok');
   assert.match(hor[2][3], /não achei/);
+  s.apiResposta({ pessoa: 'julia gomes', hora: 10, resposta: 'nada' });
+  c = JSON.parse(JSON.stringify(s.apiChamada(10)));
+  assert.deepStrictEqual(c.faltam, []);
+  assert.deepStrictEqual(c.nada, ['JULIA GOMES']);
+  const cham = p.getSheetByName('Chamada').dados;
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(cham[1].slice(2))), ['10:00 – 11:00', 'JULIA GOMES', 'nada']);
+  hor.push(['DANIEL VARGAS', '08:00', '18:00']);
+  s.apiResposta({ pessoa: 'DANIEL VARGAS', hora: 9, resposta: 'não veio' });
+  c = JSON.parse(JSON.stringify(s.apiChamada(11)));
+  assert.deepStrictEqual(c.faltam, ['JULIA GOMES']);
+  assert.deepStrictEqual(c.naoVieram, ['DANIEL VARGAS']);
+  assert.throws(() => s.apiResposta({ pessoa: 'FULANO', hora: 10, resposta: 'nada' }), /Configurações/);
+  assert.throws(() => s.apiResposta({ pessoa: 'JULIA GOMES', hora: 10, resposta: 'x' }), /inválida/);
 });
