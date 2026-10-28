@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.15.1';
+var VERSAO = '1.16.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -28,6 +28,23 @@ function doGet() {
     .setTitle('Produção')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+}
+
+// Site próprio (GitHub Pages): a página manda {fn, args} e recebe {r} ou {erro}.
+// Só as funções api… podem ser chamadas, igual ao google.script.run.
+function doPost(e) {
+  var saida;
+  try {
+    var pedido = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    var fn = String(pedido.fn || '');
+    var f = /^api[A-Z]\w*$/.test(fn) ? globalThis[fn] : null;
+    if (typeof f !== 'function') throw new Error('Função desconhecida: ' + fn);
+    saida = { r: f.apply(null, Array.isArray(pedido.args) ? pedido.args : []) };
+  } catch (err) {
+    saida = { erro: String((err && err.message) || err) };
+  }
+  return ContentService.createTextOutput(JSON.stringify(saida === undefined ? {} : saida))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 function incluir_(nome) {
