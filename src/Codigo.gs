@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.15.0';
+var VERSAO = '1.15.1';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -976,7 +976,9 @@ function promptConversa_(pessoa, faixa, categorias) {
     'Objetivo: saber, para cada categoria de produto, quantos ela testou, finalizou e quantos deram defeito nesta faixa.',
     'Use só categorias desta lista, escolhendo a mais parecida com o que foi dito (plural, apelido ou erro de ditado contam); '
       + 'se não der para saber qual, pergunte: ' + categorias.join(', ') + '.',
-    'Se só disser a quantidade sem dizer se foi testado ou finalizado, pergunte. Se a pessoa esquecer, ajude com perguntas curtas, uma de cada vez.',
+    'Se só disser a quantidade sem dizer se foi testado ou finalizado, pergunte. Não pergunte pelo que a pessoa não citou: '
+      + 'se disse só finalizados, testados e defeitos são zero. Se a pessoa esquecer, ajude com perguntas curtas, uma de cada vez.',
+    'Seja rápido: assim que entender a produção, já repita e peça a confirmação.',
     'Fale em português do Brasil, com frases curtas e naturais, porque a resposta é lida em voz alta: sem emojis, sem listas, sem markdown. '
       + 'Chame a pessoa pelo primeiro nome.',
     'Quando tiver a produção, repita tudo resumido e pergunte se está certo (acao "confirmar", com as linhas).',
