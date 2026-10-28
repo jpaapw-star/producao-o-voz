@@ -230,6 +230,7 @@
     if (!estado.dados || Date.now() - ultimaAtualizacao < 60000) return;
     ultimaAtualizacao = Date.now();
     chamar('apiInicio').then(function (d) {
+      if (conferirVersao(d.versao)) return;
       estado.dados = d;
       estado.leitor = LeitorProducao.criarLeitor(d);
       if ($('tLancar').classList.contains('ativa')) atualizar();
@@ -237,6 +238,20 @@
   }
   setInterval(atualizarListas, 600000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) atualizarListas(); });
+
+  // Versão nova publicada: o aparelho se reinicia sozinho (rascunho e fila de gravação ficam guardados no aparelho).
+  // Se o navegador não deixar, mostra um aviso com o botão Atualizar.
+  var LINK_APP = 'https://script.google.com/macros/s/AKfycbyZ1ke6fEYJ7iWRkWS-Ly7SSzr3cqe0ogvOwlxqqRP3JM_BntXhHoVeTSQ0jLo9au2lsg/exec';
+  function irParaVersaoNova() { try { window.top.location.href = LINK_APP; } catch (e) { window.open(LINK_APP, '_top'); } }
+  function conferirVersao(v) {
+    if (!v || !estado.dados || v === estado.dados.versao) return false;
+    if (Date.now() - (Number(guardar.ler('recarregou')) || 0) > 300000) {
+      guardar.por('recarregou', String(Date.now()));
+      try { window.top.location.href = LINK_APP; } catch (e) {}
+    }
+    setTimeout(function () { avisar('Saiu uma versão nova do app.', 'Atualizar', irParaVersaoNova, 600000); }, 4000);
+    return true;
+  }
 
   function desenharFaixa() {
     var dois = function (n) { return ('0' + ((n + 24) % 24)).slice(-2) + ':00'; };
@@ -574,9 +589,11 @@
     }).catch(function () { falar(texto); });
   }
   function ouvirAnuncio() {
-    if (!estado.dados || !ligada() || escondidoNoCelular() || chamada.rodando) return;
+    if (!estado.dados || !ligada() || escondidoNoCelular()) return;
     var t0 = Date.now();
     chamar('apiAnuncio').then(function (r) {
+      conferirVersao(r.versao);
+      if (chamada.rodando) return;
       acertarRelogio(r.agora, t0);
       var a = r.anuncio;
       if (!a || a.de === aparelho || a.id === anuncio.ultimo) return;
@@ -823,7 +840,7 @@
     abrirChamada(true, false, horaDaAgenda(devida));
   }, 20000);
 
-  // Horários da chamada (aba Agenda da chamada, iguais em todos os aparelhos). Sem nenhum: 07:30, 08:30… até o fim do dia.
+  // Horários da chamada (aba Agenda da chamada, iguais em todos os aparelhos). Sem nenhum: 07:30, 08:30… 16:30 e 16:45.
   function agenda() { return (estado.dados && estado.dados.agenda) || []; }
   function minutos(h) { return Number(h.slice(0, 2)) * 60 + Number(h.slice(3)); }
   function agoraMin() { var d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
@@ -831,8 +848,8 @@
   function horarios() {
     var ag = agenda();
     if (ag.length) return ag;
-    var todas = []; for (var x = 7; x < 24; x++) todas.push(doisDigitos(x) + ':30');
-    return todas;
+    var todas = []; for (var x = 7; x <= 16; x++) todas.push(doisDigitos(x) + ':30');
+    return todas.concat(['16:45']);
   }
   // A chamada cobra a hora que acabou (08:30 cobra 07:00 – 08:00); dos 45 minutos em diante, a hora em curso (09:50 cobra 09:00 – 10:00).
   function horaDaAgenda(h) {
@@ -853,7 +870,7 @@
     var ag = agenda(), lista = $('agendaLista');
     lista.innerHTML = '';
     $('agendaInfo').textContent = ag.length ? 'Chama nesses horários, só se alguém estiver devendo a produção.'
-      : 'Sem horários escolhidos: chama às 07:30, 08:30, 09:30… até o fim do dia.';
+      : 'Sem horários escolhidos: chama às 07:30, 08:30… 16:30 e 16:45.';
     ag.forEach(function (h) {
       var b = el('button', 'pilula', h + '  ✕');
       b.title = 'Tirar ' + h;
@@ -865,7 +882,7 @@
     $('agendaPor').disabled = true;
     chamar('apiSalvarAgenda', nova).then(function (r) {
       estado.dados.agenda = r; desenharAgenda(); mostrarProximo();
-      avisar(r.length ? 'Horários da chamada: ' + r.join(', ') + '.' : 'Sem horários escolhidos: chama às 07:30, 08:30, 09:30… até o fim do dia.');
+      avisar(r.length ? 'Horários da chamada: ' + r.join(', ') + '.' : 'Sem horários escolhidos: chama às 07:30, 08:30… 16:30 e 16:45.');
     }).catch(function (e) { avisar(mensagem(e)); })
       .then(function () { $('agendaPor').disabled = false; });
   }

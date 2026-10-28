@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.10.2';
+var VERSAO = '1.11.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -478,7 +478,7 @@ function horarios_(ss, l) {
   return mapa;
 }
 
-// Agenda da chamada (aba opcional): uma hora por linha na coluna A. Vazia = chama aos 30 minutos de cada hora, das 07:30 em diante.
+// Agenda da chamada (aba opcional): uma hora por linha na coluna A. Vazia = 07:30, 08:30… 16:30 e 16:45.
 // Devolve as horas em "HH:MM", em ordem e sem repetir.
 function horaAgenda_(v) {
   var m = String(v).match(/^\s*(\d{1,2})\s*(?:[:h]\s*(\d{2}))?/);
@@ -661,7 +661,7 @@ function apiAnunciar(aparelho, texto) {
 
 function apiAnuncio() {
   var bruto = CacheService.getScriptCache().get('anuncio');
-  return { agora: Date.now(), anuncio: bruto ? JSON.parse(bruto) : null };
+  return { agora: Date.now(), anuncio: bruto ? JSON.parse(bruto) : null, versao: VERSAO };
 }
 
 // Vários aparelhos com a chamada ligada: só o primeiro que pede a hora fala; os outros ficam em silêncio.
