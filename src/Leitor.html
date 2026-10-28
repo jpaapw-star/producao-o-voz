@@ -493,6 +493,18 @@
       eventos = aplicarCorrecoes(eventos);
       // Duas categorias coladas ("controle nintendo"): a primeira é o produto e a segunda só diz de quê.
       // Se a segunda é a mesma coisa mais detalhada ("fone com fone de ouvido"), fica a segunda.
+      // Se existe uma categoria com as duas coisas ("CONTROLE NINTENDO SWITCH"), fica ela.
+      eventos.forEach(function (e, k) {
+        var prox = eventos[k + 1];
+        if (!(e.e === 'cat' && prox && prox.e === 'cat' && e.alvos.length && prox.alvos.length && !e.desconhecida && !prox.desconhecida)) return;
+        var base = chaves(e.alvos[0]), quais = [chaves(prox.alvos[0])[0]].concat(chaves(prox.dito));
+        var juntas = categorias.filter(function (c) {
+          var k2 = chaves(c);
+          return c !== e.alvos[0] && base.every(function (w) { return k2.indexOf(w) >= 0; }) && quais.some(function (q) { return k2.indexOf(q) >= 0; });
+        });
+        if (juntas.length) { e.alvos = [juntas.sort(function (x, y) { return x.length - y.length; })[0]]; e.dito += ' ' + prox.dito; prox.juntada = true; }
+      });
+      eventos = eventos.filter(function (e) { return !e.juntada; });
       eventos = eventos.filter(function (e, k) {
         var ant = eventos[k - 1], prox = eventos[k + 1];
         var cat = function (x) { return x && x.e === 'cat' && !x.desconhecida && x.alvos.length; };

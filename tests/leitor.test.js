@@ -329,3 +329,9 @@ test('frase real: "controle nintendo", item sem número e "atualizada" no lugar 
   assert.strictEqual(l.ler('Ana Clara 2 nintendo switch finalizados', '').linhas[0].categoria, 'NINTENDO SWITCH OLED');
   assert.strictEqual(l.ler('Ana Clara 3 controles remotos testados', '').linhas[0].categoria, 'CONTROLE REMOTO');
 });
+
+test('duas categorias coladas viram a categoria que junta as duas, se existir', () => {
+  const l = L.criarLeitor({ pessoas: ['ANA CLARA'], categorias: ['CONTROLE', 'NINTENDO SWITCH OLED', 'CONTROLE NINTENDO SWITCH'], habitos: {}, ativos: [] });
+  const r = l.ler('Ana Clara Um controle de nitendo finalizado', '').linhas;
+  assert.deepStrictEqual(r.map((x) => [x.categoria, x.finalizados]), [['CONTROLE NINTENDO SWITCH', 1]]);
+});
