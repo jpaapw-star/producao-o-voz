@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.9.0';
+var VERSAO = '1.10.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -239,6 +239,7 @@ function apiInicio() {
     apelidos: apelidos_(ss, l),
     comHorario: Object.keys(horarios_(ss, l)).length,
     agenda: agenda_(ss),
+    vozNatural: !!chaveVoz_(),
     supervisores: l.supervisores,
     maximos: maximos_(ss),
     habitos: h.habitos,
@@ -657,6 +658,36 @@ function apiAnunciar(aparelho, texto) {
   var anuncio = { id: aparelho + '-' + agora, de: String(aparelho), texto: String(texto).slice(0, 300), falarEm: agora + 3000 };
   CacheService.getScriptCache().put('anuncio', JSON.stringify(anuncio), 600);
   return { agora: Date.now(), anuncio: anuncio };
+}
+
+// Voz natural do Google (Chirp 3 HD). A chave fica no segredo TTS_CHAVE do GitHub; sem ela, os aparelhos usam a voz deles.
+var VOZES_NATURAIS = ['Aoede', 'Kore', 'Leda', 'Zephyr', 'Charon', 'Fenrir', 'Orus', 'Puck'];
+function chaveVoz_() {
+  var segredos = (typeof SEGREDOS !== 'undefined' && SEGREDOS) ? SEGREDOS : {};
+  return segredos.ttsChave || PropertiesService.getScriptProperties().getProperty('TTS_CHAVE') || '';
+}
+
+// Devolve o MP3 da frase em base64. A mesma frase com a mesma voz fica guardada 6 horas (não gasta cota de novo).
+function apiVoz(texto, voz) {
+  var chave = chaveVoz_();
+  if (!chave) throw new Error('A voz natural ainda não foi ligada (falta a chave).');
+  texto = String(texto || '').slice(0, 300);
+  if (VOZES_NATURAIS.indexOf(voz) < 0) voz = VOZES_NATURAIS[0];
+  var cache = CacheService.getScriptCache();
+  var id = 'voz-' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, voz + '|' + texto, Utilities.Charset.UTF_8));
+  var guardado = cache.get(id);
+  if (guardado) return guardado;
+  var r = UrlFetchApp.fetch('https://texttospeech.googleapis.com/v1/text:synthesize?key=' + encodeURIComponent(chave), {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({ input: { text: texto }, voice: { languageCode: 'pt-BR', name: 'pt-BR-Chirp3-HD-' + voz },
+      audioConfig: { audioEncoding: 'MP3' } })
+  });
+  var corpo = JSON.parse(r.getContentText() || '{}');
+  if (r.getResponseCode() !== 200 || !corpo.audioContent) {
+    throw new Error('Voz natural indisponível: ' + ((corpo.error && corpo.error.message) || ('erro ' + r.getResponseCode())));
+  }
+  if (corpo.audioContent.length < 95000) cache.put(id, corpo.audioContent, 21600);
+  return corpo.audioContent;
 }
 
 function apiAnuncio() {

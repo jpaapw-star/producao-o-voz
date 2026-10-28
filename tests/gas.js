@@ -90,8 +90,14 @@ function carregarServidor(planilha, opcoes = {}) {
         return new Date(Date.UTC(+m[3], +m[2] - 1, +m[1], +m[4] + 3, +m[5], +m[6]));
       }
     },
-    HtmlService: {}
+    HtmlService: {},
+    UrlFetchApp: { fetch: (url, o) => (opcoes.fetch ? opcoes.fetch(url, o) : { getResponseCode: () => 500, getContentText: () => '{}' }) }
   };
+  Object.assign(ctx.Utilities, {
+    DigestAlgorithm: { MD5: 'md5' }, Charset: { UTF_8: 'utf8' },
+    computeDigest: (_, t) => Array.from(require('crypto').createHash('md5').update(t).digest()),
+    base64EncodeWebSafe: (b) => Buffer.from(b).toString('base64url')
+  });
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'Codigo.gs'), 'utf8'), ctx);
   return ctx;

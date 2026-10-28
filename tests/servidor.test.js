@@ -241,3 +241,18 @@ test('agenda da chamada: salva na aba, em ordem, e volta no início', () => {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().agenda)), ['11:50'], 'tirar um horário apaga a linha');
   assert.throws(() => s.apiSalvarAgenda(['25:00']), /inválido/);
 });
+
+test('voz natural: sem chave avisa; com chave pede ao Google uma vez e guarda', () => {
+  const pedidos = [];
+  const s = carregarServidor(planilha(), { fetch: (url, o) => { pedidos.push([url, JSON.parse(o.payload)]); return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ audioContent: 'QUJD' }) }; } });
+  assert.strictEqual(s.apiInicio().vozNatural, false);
+  assert.throws(() => s.apiVoz('Oi', 'Kore'), /falta a chave/);
+  s.SEGREDOS.ttsChave = 'k';
+  assert.strictEqual(s.apiInicio().vozNatural, true);
+  assert.strictEqual(s.apiVoz('Daniel, falta a sua produção das 9 horas.', 'Kore'), 'QUJD');
+  assert.strictEqual(s.apiVoz('Daniel, falta a sua produção das 9 horas.', 'Kore'), 'QUJD');
+  assert.strictEqual(pedidos.length, 1, 'a segunda vez vem guardada');
+  assert.strictEqual(pedidos[0][1].voice.name, 'pt-BR-Chirp3-HD-Kore');
+  s.apiVoz('Oi', 'Inventada');
+  assert.strictEqual(pedidos[1][1].voice.name, 'pt-BR-Chirp3-HD-Aoede');
+});
