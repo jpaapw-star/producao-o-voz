@@ -765,6 +765,8 @@
       if (r.acao === 'gravar' && linhas.length) { conversa.linhas = linhas; return gravarConversa(); }
       if (r.acao === 'nada') { conversa.linhas = 'nada'; return gravarConversa(); }
       if (r.acao === 'desistir') return encerrarConversa(r.fala + ' Vou chamar a próxima pessoa.');
+      // Conversa paralela da sala, não era para a IA: não responde e continua ouvindo.
+      if (r.acao === 'ignorar') { conversa.historico.pop(); conversa.historico.pop(); conversa.etapa = 'ia'; mostrarConversa('Ouvindo ' + primeiroNome(e.pessoa) + '…'); return ouvirRespostas(agoraCerto() + 40000, ouviuNaConversa); }
       dizerEOuvir(r.fala, 'ia');
     }).catch(function () {
       // IA fora do ar: continua pelas regras do app.
@@ -779,9 +781,11 @@
     var t = semAcentoMin(texto);
     var linhas = linhasDaPessoa(texto, e.pessoa);
     if (conversa.etapa === 'esperando') {
+      // Na sala tem conversa paralela: só vale quando a pessoa se apresenta ("sou eu", "sou a Ana", "Ana aqui", "Ana presente").
       var nome = semAcentoMin(e.pessoa).split(' ')[0];
-      var chegou = (' ' + t + ' ').indexOf(' ' + nome + ' ') >= 0 || /\b(sou eu|e eu|eu mesm[ao]|cheguei|presente|to aqui|estou aqui|aqui)\b/.test(t);
-      if (!chegou && !linhas.length) return;
+      var temNome = (' ' + t + ' ').indexOf(' ' + nome + ' ') >= 0;
+      var chegou = /\bsou eu\b|\beu mesm[ao]\b/.test(t) || (temNome && /\b(sou|aqui|presente|cheguei)\b/.test(t));
+      if (!chegou) return;
       pararDeOuvir();
       conversa.etapa = 'pegando';
       conversa.textos = [texto]; conversa.tentativas = 0; conversa.linhas = null;
@@ -801,6 +805,10 @@
     }
     conversa.textos.push(texto);
     if (conversa.etapa === 'ia') { conversa.historico.push({ quem: 'pessoa', texto: texto }); return perguntarIA(); }
+    // Sem a IA: frase sem número nem resposta conhecida é conversa paralela da sala, ignora e continua ouvindo.
+    var temNumero = /\d|\b(um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|quinze|vinte|trinta)\b/.test(t);
+    var resposta = /\b(sim|isso|certo|correto|exato|pode|confirmo|confirma|manda|beleza|ok|nao|errado|errei|espera|corrig|nada|nenhum|nenhuma|esqueci|lembro|sei)/.test(t);
+    if (!linhas.length && !temNumero && !resposta) { conversa.textos.pop(); return; }
     if (conversa.etapa === 'producao') {
       if (linhas.length) return confirmar(linhas);
       if (/\b(nada|nao fiz nada|nenhum|nenhuma)\b/.test(t)) { conversa.linhas = 'nada'; return dizerEOuvir('Nada nesta faixa. Está certo?', 'confirmar'); }
