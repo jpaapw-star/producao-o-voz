@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.8.2';
+var VERSAO = '1.8.4';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
