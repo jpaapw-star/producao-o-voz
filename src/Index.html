@@ -529,11 +529,11 @@
   $('voltarHoje').onclick = function () { tela('tLancar'); };
 
   /* ---------- chamada ---------- */
-  // Regras da chamada: fala todos os nomes que faltam de uma vez. Quem não responder em 2 minutos é chamado de novo
-  // (segunda chamada, de novo todos juntos); depois disso fica "não respondeu". Duas horas do dia sem responder = falta no dia (planilha).
+  // Regras da chamada: fala todos os nomes que faltam de uma vez e chama de novo a cada 2 minutos quem ainda não respondeu,
+  // até responder (ou até o próximo horário da chamada). Falta nunca é marcada sozinha: só "Não veio hoje".
   var ESPERA = 120000;
   var chamada = { fila: [], vezes: {}, semResposta: [], faltas: [], feitos: [], nada: [], naoVieram: [], hora: null, faixa: '',
-    auto: false, rodando: false, rodada: 0, acao: null, voltar: null, timerTeste: null, teste: null };
+    auto: false, rodando: false, rodada: 0, limite: 0, acao: null, voltar: null, timerTeste: null, teste: null };
   var bonito = function (n) { return String(n).toLowerCase().replace(/(^|\s)(\S)/g, function (m, a, c) { return a + c.toUpperCase(); }); };
   function hojeTexto() { var d = dataCerta(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
 
@@ -696,19 +696,19 @@
     lista.forEach(function (n) { chamada.vezes[n] = chamada.rodada; });
     var nomes = lista.map(nomeCurto);
     var juntos = nomes.length > 1 ? nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1] : nomes[0];
-    falar((chamada.rodada > 1 ? 'Segunda chamada. ' : '') + 'Falta a produção ' + faixaFalada() + (nomes.length > 1 ? ' de: ' : ' de ') + juntos + '.');
+    falar((chamada.rodada > 1 ? 'Chamando de novo. ' : '') + 'Falta a produção ' + faixaFalada() + (nomes.length > 1 ? ' de: ' : ' de ') + juntos + '.');
     desenharChamada();
     var depois = alvo + ESPERA;
     agendar(depois - 3000, function () { fimDaEspera(depois); });
-    planejar(depois - agoraCerto(), chamada.rodada > 1 ? 'Quem não responder fica "não respondeu"' : 'Quem não responder é chamado de novo');
+    planejar(depois - agoraCerto(), depois < chamada.limite ? 'Quem não responder é chamado de novo' : 'Fim desta chamada');
   }
 
-  // Acabaram os 2 minutos: primeira vez chama de novo quem falta; segunda vez, quem falta fica "não respondeu".
+  // Acabaram os 2 minutos: quem falta é chamado de novo (lista lida na hora); no próximo horário da chamada, fica "não respondeu".
   // A lista é lida na hora, e todos os computadores falam no mesmo instante.
   function fimDaEspera(alvo) {
     lerListaDaVez(alvo).then(function () {
       if (!chamada.rodando) return;
-      if (chamada.rodada < 2 && pendentesReais().length) { chamada.rodada = 2; return agendar(alvo, function () { falarRodada(alvo); }); }
+      if (pendentesReais().length && alvo < chamada.limite) { chamada.rodada++; return agendar(alvo, function () { falarRodada(alvo); }); }
       agendar(alvo, function () {
         pendentesReais().forEach(function (n) { chamada.semResposta.push(n); responder(n, 'não respondeu'); });
         chamada.fila = chamada.fila.filter(function (n) { return n === chamada.teste; });
@@ -746,7 +746,7 @@
     chamada.teste = null;
     chamada.fila = chamada.fila.filter(function (n) { return n !== nome; });
     desenharChamada();
-    avisar('Teste: 2 chamadas sem resposta. De verdade, ficaria "não respondeu" nesta hora; com 2 horas assim no dia, falta.', 'Ok', function () { $('aviso').style.display = 'none'; }, 30000);
+    avisar('Teste: 2 chamadas sem resposta. De verdade, a chamada continua chamando a cada 2 minutos até a pessoa responder.', 'Ok', function () { $('aviso').style.display = 'none'; }, 30000);
   }
 
   // Na chamada sozinha, quem está no meio de um lançamento não é interrompido: só aparece um aviso.
@@ -780,6 +780,11 @@
       if (ligada() && pendentesReais().length && ((auto && chamada.falarEm) || forcar)) {
         chamada.rodando = true; chamada.rodada = 1;
         var falarEm = auto && chamada.falarEm ? chamada.falarEm : agoraCerto() + 3000;
+        // Chama de novo até o próximo horário da chamada; depois do último do dia, por mais 1 hora.
+        var inicio = new Date(falarEm), hhmm = doisDigitos(inicio.getHours()) + ':' + doisDigitos(inicio.getMinutes());
+        var seguinte = horarios().filter(function (t) { return t > hhmm; })[0];
+        if (seguinte) { inicio.setHours(Number(seguinte.slice(0, 2)), Number(seguinte.slice(3)), 0, 0); chamada.limite = inicio.getTime() - 10000; }
+        else chamada.limite = falarEm + 3600000;
         var ms = Math.max(0, falarEm - agoraCerto());
         // 3 s antes de falar, lê de novo quem falta, para pegar quem acabou de lançar em outro computador.
         agendar(falarEm - 3000, function () { lerEFalar(falarEm); });
@@ -803,7 +808,7 @@
       var c = el('div', 'cartao vez');
       c.appendChild(el('div', 'grande', bonito(nome)));
       c.appendChild(el('div', 'item', (nome === chamada.teste ? 'Teste: as respostas não vão para a aba Chamada' : 'Falta a produção das ' + chamada.faixa) +
-        (chamada.vezes[nome] > 1 ? ' · segunda chamada' : '')));
+        (chamada.vezes[nome] > 1 ? ' · chamado ' + chamada.vezes[nome] + ' vezes' : '')));
       var a = el('div', 'acoes');
       var b1 = el('button', 'principal', 'Lançar agora');
       b1.onclick = function () {
