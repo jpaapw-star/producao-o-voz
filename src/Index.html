@@ -613,9 +613,15 @@
     ouvirAte = ate;
     try {
       var r = new Reconhecer();
-      r.lang = 'pt-BR'; r.continuous = true; r.interimResults = false;
+      r.lang = 'pt-BR'; r.continuous = true; r.interimResults = true;
       r.onresult = function (e) {
-        for (var i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) tratar(e.results[i][0].transcript);
+        for (var i = e.resultIndex; i < e.results.length; i++) {
+          var dito = e.results[i][0].transcript;
+          if (ehEco(dito)) continue;
+          // A pessoa falou por cima: o computador se cala e escuta.
+          if (falandoAgora) { falandoAgora = ''; try { window.speechSynthesis.cancel(); } catch (x) {} }
+          if (e.results[i].isFinal) tratar(dito);
+        }
       };
       r.onerror = function (e) {
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture') {
@@ -628,6 +634,16 @@
       ouvindo = r; r.start();
       $('ouvindo').textContent = 'Ouvindo as respostas…';
     } catch (e) { ouvindo = null; }
+  }
+  // O microfone também pega a voz do próprio computador: o que só repete a frase que ele está falando
+  // (ou acabou de falar) é eco, não resposta.
+  var falandoAgora = '', ultimaFala = '', ultimaFalaAte = 0;
+  function ehEco(t) {
+    var frase = falandoAgora || (Date.now() < ultimaFalaAte ? ultimaFala : '');
+    if (!frase) return false;
+    var f = ' ' + semAcentoMin(frase) + ' ';
+    var w = semAcentoMin(t).split(' ').filter(Boolean);
+    return !w.length || w.every(function (x) { return f.indexOf(' ' + x + ' ') >= 0; });
   }
   function pararDeOuvir() {
     var r = ouvindo; ouvindo = null;
@@ -693,11 +709,11 @@
   function chamarPessoa(e) {
     if (!conversa.vez || conversa.vez.falarEm !== e.falarEm) return;
     // A lista de quem falta só é falada quando a fila chega no fim e volta ao começo.
-    var lista = e.anunciar && e.fila.length > 1 ? 'Voltando ao começo da lista. Ainda falta a produção ' + faixaFalada() + ' de: ' + juntarNomes(e.fila.map(nomeCurto)) + '. ' : '';
+    var lista = e.anunciar && e.fila.length > 1 ? 'Voltando ao começo da lista. Ainda falta a produção de: ' + juntarNomes(e.fila.map(nomeCurto)) + '. ' : '';
     var outra = e.tentativas[e.pessoa] ? 'Chamando de novo. ' : '';
     chamada.vezes[e.pessoa] = (e.tentativas[e.pessoa] || 0) + 1;
     desenharChamada();
-    falar(lista + outra + nomeCurto(e.pessoa) + ', venha lançar a sua produção ' + faixaFalada() + '. Quando chegar no computador, diga: sou eu.', function () {
+    falar(lista + outra + nomeCurto(e.pessoa) + ', venha lançar a sua produção. Quando chegar no computador, diga: sou eu.', function () {
       if (!conversa.vez || conversa.vez.falarEm !== e.falarEm || conversa.vez.dono) return;
       conversa.etapa = 'esperando';
       mostrarConversa('Esperando ' + primeiroNome(e.pessoa) + ' dizer "sou eu"…');
@@ -716,13 +732,21 @@
   function resumoSemNome(l) { return resumoLinha(l).split(', ').slice(1).join(', '); }
 
   // Fala e depois ouve a resposta (40 s). Cada fala renova a vez no servidor, para os outros não chamarem por cima.
+  // Já ouve enquanto fala: se a pessoa falar por cima, o computador se cala (o eco da própria voz é ignorado).
   function dizerEOuvir(frase, etapa) {
     var e = conversa.vez;
     pararDeOuvir();
     conversa.etapa = etapa;
     if (!conversa.teste) chamar('apiPegarVez', chamada.hora, e.falarEm, aparelho).catch(function () {});
+    falandoAgora = frase;
+    ouvirRespostas(agoraCerto() + 40000 + frase.length * 90, ouviuNaConversa);
     mostrarConversa(etapa === 'confirmar' ? 'Esperando ' + primeiroNome(e.pessoa) + ' confirmar…' : 'Ouvindo ' + primeiroNome(e.pessoa) + '…');
-    falar(frase, function () { if (conversa.etapa === etapa) ouvirRespostas(agoraCerto() + 40000, ouviuNaConversa); });
+    falar(frase, function () {
+      if (falandoAgora === frase) { falandoAgora = ''; ultimaFala = frase; ultimaFalaAte = Date.now() + 1500; }
+      if (conversa.etapa !== etapa) return;
+      if (ouvindo) ouvirAte = Math.max(ouvirAte, agoraCerto() + 40000);
+      else ouvirRespostas(agoraCerto() + 40000, ouviuNaConversa);
+    });
   }
   function confirmar(linhas) {
     conversa.linhas = linhas;
@@ -813,7 +837,7 @@
         // Com a IA do Google configurada, a conversa é livre; sem ela, segue as regras do app.
         conversa.ia = !!(estado.dados && estado.dados.ia);
         if (conversa.ia) {
-          conversa.historico = [{ quem: 'ia', texto: nomeCurto(e.pessoa) + ', venha lançar a sua produção ' + faixaFalada() + '.' }, { quem: 'pessoa', texto: texto }];
+          conversa.historico = [{ quem: 'ia', texto: nomeCurto(e.pessoa) + ', venha lançar a sua produção.' }, { quem: 'pessoa', texto: texto }];
           return perguntarIA();
         }
         if (linhas.length) return confirmar(linhas);
@@ -975,7 +999,6 @@
   aCadaTique(function () { if ($('tChamada').classList.contains('ativa')) mostrarProximo(); });
 
   function nomeCurto(nome) { return bonito(nome.split(/\s+/).slice(0, 2).join(' ')); }
-  function faixaFalada() { return 'das ' + chamada.hora + ' e meia às ' + ((chamada.hora + 1) % 24) + ' e meia'; }
   function pendentesReais() { return chamada.fila.filter(function (n) { return n !== chamada.teste; }); }
 
   // 3 s antes de falar, pega a lista da vez: o primeiro computador lê a planilha (lançamentos de todos) e os outros
@@ -1013,7 +1036,7 @@
     var juntos = nomes.length > 1 ? nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1] : nomes[0];
     var depois = alvo + ESPERA;
     pararDeOuvir();
-    falar((chamada.rodada > 1 ? 'Chamando de novo. ' : '') + 'Falta a produção ' + faixaFalada() + (nomes.length > 1 ? ' de: ' : ' de ') + juntos + '.',
+    falar((chamada.rodada > 1 ? 'Chamando de novo. ' : '') + 'Falta a produção' + (nomes.length > 1 ? ' de: ' : ' de ') + juntos + '.',
       function () { ouvirRespostas(depois - 5000); });
     desenharChamada();
     agendar(depois - 3000, function () { fimDaEspera(depois); });
@@ -1048,7 +1071,7 @@
     nome = nome || chamada.fila[0];
     if (!nome) return;
     chamada.vezes[nome] = Math.max(1, chamada.vezes[nome] || 0);
-    falar(nomeCurto(nome) + ', falta a sua produção ' + faixaFalada() + '.');
+    falar(nomeCurto(nome) + ', falta a sua produção.');
     desenharChamada();
   }
 
@@ -1058,7 +1081,7 @@
     if (!nome) return;
     if (chamada.vezes[nome] < 2) {
       chamada.vezes[nome] = 2; avisar('Teste: 2 minutos sem resposta. Chamando a segunda vez.');
-      falar(nomeCurto(nome) + ', falta a sua produção ' + faixaFalada() + '. Segunda chamada.');
+      falar(nomeCurto(nome) + ', falta a sua produção. Segunda chamada.');
       chamada.timerTeste = setTimeout(testeSemResposta, ESPERA); desenharChamada(); return;
     }
     chamada.teste = null;
@@ -1205,7 +1228,7 @@
     conversa.teste = true; conversa.vez = e; conversa.etapa = 'chamando';
     conversa.linhas = null; conversa.textos = []; conversa.historico = []; conversa.tentativas = 0;
     window.scrollTo(0, 0);
-    falar('Teste de conversa. ' + nomeCurto(n) + ', venha lançar a sua produção ' + faixaFalada() + '. Quando chegar no computador, diga: sou eu.', function () {
+    falar('Teste de conversa. ' + nomeCurto(n) + ', venha lançar a sua produção. Quando chegar no computador, diga: sou eu.', function () {
       if (!conversa.teste || conversa.vez !== e) return;
       conversa.etapa = 'esperando';
       ouvirRespostas(agoraCerto() + 60000, ouviuNaConversa);

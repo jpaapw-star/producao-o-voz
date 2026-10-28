@@ -996,7 +996,10 @@ function promptConversa_(pessoa, faixa, categorias) {
     'Se só disser a quantidade sem dizer se foi testado ou finalizado, pergunte. Não pergunte pelo que a pessoa não citou: '
       + 'se disse só finalizados, testados e defeitos são zero. Se a pessoa esquecer, ajude com perguntas curtas, uma de cada vez.',
     'Nesta equipe, "testado" quer dizer testado e aprovado (está ok). Nunca pergunte se os testados deram defeito nem se estão ok. '
-      + 'Defeito é uma quantidade separada, só conte quando a pessoa falar em defeito; se não falar, defeitos é zero.',
+      + 'Defeito é uma quantidade separada, só conte quando a pessoa falar em defeito; se não falar, defeitos é zero. '
+      + 'Se ela disser que testou e deu defeito ("testei 2 e deram defeito"), conte só em defeitos (testados zero). '
+      + 'Se disser que testou vários e alguns deram defeito ("testei 5, 2 deram defeito"), os testados são só os que ficaram ok (3) e os defeitos à parte (2).',
+    'Nunca fale o horário nem a faixa (o app já anota na planilha).',
     'Seja rápido: assim que entender a produção, já repita e peça a confirmação.',
     'Fale em português do Brasil, com frases curtas e naturais, porque a resposta é lida em voz alta: sem emojis, sem listas, sem markdown. '
       + 'Chame a pessoa pelo primeiro nome.',

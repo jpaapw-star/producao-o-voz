@@ -392,4 +392,6 @@ test('IA: testado já é ok, não pergunta de defeito', () => {
   const p = s.promptConversa_('Ana', '09:30 às 10:30', ['NOTEBOOK']);
   assert.match(p, /"testado" quer dizer testado e aprovado/);
   assert.match(p, /Nunca pergunte se os testados deram defeito/);
+  assert.match(p, /conte só em defeitos/);
+  assert.match(p, /Nunca fale o horário/);
 });

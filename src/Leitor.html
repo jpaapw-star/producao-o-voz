@@ -622,6 +622,15 @@
         return 'numero';
       }
 
+      // Testado quer dizer aprovado: "2 testados com defeito" e "testei 2 e deu defeito" (defeito sem número) são só defeitos.
+      function defeitoDosTestados(ev, depois) {
+        if (ev.campo !== 'defeitos' || (depois && depois.e === 'num') || pendentes.length || esperando.length) return false;
+        if (!atual || !atual.testados || atual.defeitos || atual.finalizados || atual.semTipo.length) return false;
+        ev.usado = true;
+        atual.defeitos = atual.testados; atual.testados = 0;
+        return true;
+      }
+
       estilo = estiloDesde(0);
       eventos.forEach(function (ev, i) {
         var antes = eventos[i - 1], depois = eventos[i + 1];
@@ -673,10 +682,11 @@
               pendentes.forEach(function (x) { somar(l2, null, x.v); });
               pendentes = [];
               somar(l2, ev.campo, p.v);
-            } else esperando.push(ev.campo);
+            } else if (!defeitoDosTestados(ev, depois)) esperando.push(ev.campo);
             return;
           }
           if (ev.usado) return;
+          if (defeitoDosTestados(ev, depois)) return;
           // "4 testados e finalizados": o mesmo número vale para os dois.
           if (antes && antes.e === 'tipo' && antes.usado && !ev.parecido) {
             ev.usado = true; ev.valor = antes.valor;
