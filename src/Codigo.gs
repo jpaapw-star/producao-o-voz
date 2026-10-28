@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.9.0';
+var VERSAO = '1.10.1';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -478,7 +478,7 @@ function horarios_(ss, l) {
   return mapa;
 }
 
-// Agenda da chamada (aba opcional): uma hora por linha na coluna A. Vazia = chama aos 50 minutos de cada hora.
+// Agenda da chamada (aba opcional): uma hora por linha na coluna A. Vazia = chama aos 30 minutos de cada hora, das 07:30 em diante.
 // Devolve as horas em "HH:MM", em ordem e sem repetir.
 function horaAgenda_(v) {
   var m = String(v).match(/^\s*(\d{1,2})\s*(?:[:h]\s*(\d{2}))?/);
@@ -495,10 +495,10 @@ function agenda_(ss) {
   });
   return lista.sort();
 }
-// Faixa que a chamada de um horário cobra: da hora em curso a partir dos 30 minutos; antes disso, a hora anterior.
+// Faixa que a chamada de um horário cobra: a hora que acabou (08:30 cobra 07:00 – 08:00); dos 45 minutos em diante, a hora em curso.
 function faixaDaAgenda_(h) {
   var hora = Number(h.slice(0, 2)), min = Number(h.slice(3));
-  var x = min >= 30 ? hora : (hora + 23) % 24;
+  var x = min >= 45 ? hora : (hora + 23) % 24;
   return ('0' + x).slice(-2) + ':00 – ' + ('0' + (x + 1) % 24).slice(-2) + ':00';
 }
 

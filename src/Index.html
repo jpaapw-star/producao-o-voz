@@ -152,7 +152,7 @@
     <div style="font-weight:600">Horários da chamada</div>
     <div id="agendaInfo" class="item"></div>
     <div id="agendaLista" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px"></div>
-    <div style="display:flex;gap:8px;margin-top:10px"><input type="time" id="agendaNova" class="trocar" style="margin:0;flex:1;min-width:0" value="09:50"><button id="agendaPor" class="pilula" style="flex-shrink:0">Adicionar</button></div>
+    <div style="display:flex;gap:8px;margin-top:10px"><input type="time" id="agendaNova" class="trocar" style="margin:0;flex:1;min-width:0" value="07:30"><button id="agendaPor" class="pilula" style="flex-shrink:0">Adicionar</button></div>
   </div>
   <div class="chave"><select id="voz" class="trocar" style="margin:0;flex:1;min-width:0"><option value="">Voz padrão do aparelho</option></select><button id="ouvirVoz" class="pilula" style="flex-shrink:0">Ouvir</button></div>
   <div class="chave"><select id="testeNome" class="trocar" style="margin:0;flex:1;min-width:0"></select><button id="testar" class="pilula" style="flex-shrink:0">Testar</button></div>
@@ -584,7 +584,7 @@
       if ($('tChamada').classList.contains('ativa')) conferirFila();
     }).catch(function () {});
   }
-  // Consulta a cada 2 s, para todos falarem juntos mesmo quando alguém aperta Chamada fora dos 50 minutos.
+  // Consulta a cada 2 s, para todos falarem juntos mesmo quando alguém aperta Chamada fora do horário da chamada.
   var ultimaConsulta = 0;
   setInterval(function () {
     if (Date.now() - ultimaConsulta < 2000) return;
@@ -783,7 +783,7 @@
   };
   $('voltarChamada').onclick = function () { clearTimeout(chamada.timer); chamada.auto = false; chamada.rodando = false; abrirLancar(); };
 
-  // Chamada sozinha: uma vez por hora, a partir dos 50 minutos, com o app aberto.
+  // Chamada sozinha: nos horários da chamada, com o app aberto.
   // Vem ligada ao abrir o app; só desliga se alguém desmarcar neste aparelho.
   function ligada() { return guardar.ler('chamarSozinho') !== '0'; }
   // No computador a chamada fala mesmo com a aba do navegador em segundo plano; no celular, só com a tela à vista.
@@ -818,7 +818,7 @@
     abrirChamada(true, false, horaDaAgenda(devida));
   }, 20000);
 
-  // Horários da chamada (aba Agenda da chamada, iguais em todos os aparelhos). Sem nenhum: aos 50 minutos de cada hora.
+  // Horários da chamada (aba Agenda da chamada, iguais em todos os aparelhos). Sem nenhum: 07:30, 08:30… até o fim do dia.
   function agenda() { return (estado.dados && estado.dados.agenda) || []; }
   function minutos(h) { return Number(h.slice(0, 2)) * 60 + Number(h.slice(3)); }
   function agoraMin() { var d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
@@ -826,12 +826,12 @@
   function horarios() {
     var ag = agenda();
     if (ag.length) return ag;
-    var todas = []; for (var x = 0; x < 24; x++) todas.push(doisDigitos(x) + ':50');
+    var todas = []; for (var x = 7; x < 24; x++) todas.push(doisDigitos(x) + ':30');
     return todas;
   }
-  // A chamada das 10:05 ainda cobra a faixa 09:00 – 10:00; a partir dos 30 minutos, cobra a hora em curso.
+  // A chamada cobra a hora que acabou (08:30 cobra 07:00 – 08:00); dos 45 minutos em diante, a hora em curso (09:50 cobra 09:00 – 10:00).
   function horaDaAgenda(h) {
-    var x = Number(h.slice(0, 2)) + (Number(h.slice(3)) >= 30 ? 0 : -1);
+    var x = Number(h.slice(0, 2)) + (Number(h.slice(3)) >= 45 ? 0 : -1);
     return (x + (estado.ajusteHora || 0) + 48) % 24;
   }
   function faixaTexto(x) { return doisDigitos(x) + ':00 – ' + doisDigitos((x + 1) % 24) + ':00'; }
@@ -848,7 +848,7 @@
     var ag = agenda(), lista = $('agendaLista');
     lista.innerHTML = '';
     $('agendaInfo').textContent = ag.length ? 'Chama nesses horários, só se alguém estiver devendo a produção.'
-      : 'Nenhum horário escolhido: chama aos 50 minutos de cada hora.';
+      : 'Sem horários escolhidos: chama às 07:30, 08:30, 09:30… até o fim do dia.';
     ag.forEach(function (h) {
       var b = el('button', 'pilula', h + '  ✕');
       b.title = 'Tirar ' + h;
@@ -860,7 +860,7 @@
     $('agendaPor').disabled = true;
     chamar('apiSalvarAgenda', nova).then(function (r) {
       estado.dados.agenda = r; desenharAgenda(); mostrarProximo();
-      avisar(r.length ? 'Horários da chamada: ' + r.join(', ') + '.' : 'Sem horários: chama aos 50 minutos de cada hora.');
+      avisar(r.length ? 'Horários da chamada: ' + r.join(', ') + '.' : 'Sem horários escolhidos: chama às 07:30, 08:30, 09:30… até o fim do dia.');
     }).catch(function (e) { avisar(mensagem(e)); })
       .then(function () { $('agendaPor').disabled = false; });
   }
