@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.13.1';
+var VERSAO = '1.13.2';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -489,7 +489,7 @@ function horarios_(ss, l) {
   return mapa;
 }
 
-// Agenda da chamada (aba opcional): uma hora por linha na coluna A. Vazia = 07:30, 08:30… 16:30 e 16:45.
+// Agenda da chamada (aba opcional): uma hora por linha na coluna A. Vazia = 07:30, 08:30… 16:30 (menos 13:30) e 16:45.
 // Devolve as horas em "HH:MM", em ordem e sem repetir.
 function horaAgenda_(v) {
   var m = String(v).match(/^\s*(\d{1,2})\s*(?:[:h]\s*(\d{2}))?/);
@@ -514,12 +514,12 @@ function horaDaAgenda_(h) {
   var x = t - (atual * 60 + 30) >= 15 ? atual : atual - 1;
   return (x + 48) % 24;
 }
-// Horários da chamada: os da aba Agenda da chamada; sem nenhum, 07:30, 08:30… 16:30 e 16:45 (igual ao app).
+// Horários da chamada: os da aba Agenda da chamada; sem nenhum, 07:30, 08:30… 16:30 (menos 13:30) e 16:45 (igual ao app).
 function horariosDaChamada_(ss) {
   var ag = agenda_(ss);
   if (ag.length) return ag;
   var todas = [];
-  for (var x = 7; x <= 16; x++) todas.push(('0' + x).slice(-2) + ':30');
+  for (var x = 7; x <= 16; x++) if (x !== 13) todas.push(('0' + x).slice(-2) + ':30');
   return todas.concat(['16:45']);
 }
 // Momento (em horas) em que a faixa h é cobrada: o último horário da chamada que cobra essa faixa (16:45 para 16:30 – 17:30).

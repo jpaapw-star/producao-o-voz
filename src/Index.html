@@ -906,7 +906,7 @@
     abrirChamada(true, false, horaDaAgenda(devida));
   });
 
-  // Horários da chamada (aba Agenda da chamada, iguais em todos os aparelhos). Sem nenhum: 07:30, 08:30… 16:30 e 16:45.
+  // Horários da chamada (aba Agenda da chamada, iguais em todos os aparelhos). Sem nenhum: 07:30, 08:30… 16:30 (menos 13:30) e 16:45.
   function agenda() { return (estado.dados && estado.dados.agenda) || []; }
   function minutos(h) { return Number(h.slice(0, 2)) * 60 + Number(h.slice(3)); }
   function agoraMin() { var d = dataCerta(); return d.getHours() * 60 + d.getMinutes(); }
@@ -914,7 +914,8 @@
   function horarios() {
     var ag = agenda();
     if (ag.length) return ag;
-    var todas = []; for (var x = 7; x <= 16; x++) todas.push(doisDigitos(x) + ':30');
+    // Sem a das 13:30 (pedido do João Pedro).
+    var todas = []; for (var x = 7; x <= 16; x++) if (x !== 13) todas.push(doisDigitos(x) + ':30');
     return todas.concat(['16:45']);
   }
   // A chamada cobra a faixa que acabou (08:30 cobra 07:30 – 08:30); com 15 minutos ou mais de faixa nova, a faixa em curso
@@ -939,7 +940,7 @@
     var ag = agenda(), lista = $('agendaLista');
     lista.innerHTML = '';
     $('agendaInfo').textContent = ag.length ? 'Chama nesses horários, só se alguém estiver devendo a produção.'
-      : 'Sem horários escolhidos: chama às 07:30, 08:30… 16:30 e 16:45.';
+      : 'Sem horários escolhidos: chama às 07:30, 08:30… 16:30 (menos 13:30) e 16:45.';
     ag.forEach(function (h) {
       var b = el('button', 'pilula', h + '  ✕');
       b.title = 'Tirar ' + h;
@@ -951,7 +952,7 @@
     $('agendaPor').disabled = true;
     chamar('apiSalvarAgenda', nova).then(function (r) {
       estado.dados.agenda = r; desenharAgenda(); mostrarProximo();
-      avisar(r.length ? 'Horários da chamada: ' + r.join(', ') + '.' : 'Sem horários escolhidos: chama às 07:30, 08:30… 16:30 e 16:45.');
+      avisar(r.length ? 'Horários da chamada: ' + r.join(', ') + '.' : 'Sem horários escolhidos: chama às 07:30, 08:30… 16:30 (menos 13:30) e 16:45.');
     }).catch(function (e) { avisar(mensagem(e)); })
       .then(function () { $('agendaPor').disabled = false; });
   }
