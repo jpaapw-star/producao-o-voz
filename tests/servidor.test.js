@@ -386,3 +386,10 @@ test('site próprio: doPost chama só funções api e devolve JSON', () => {
   s.SEGREDOS.planilhaId = '';
   assert.match(post({ fn: 'apiInicio' }).erro, /configurado/);
 });
+
+test('IA: testado já é ok, não pergunta de defeito', () => {
+  const s = carregarServidor(planilha());
+  const p = s.promptConversa_('Ana', '09:30 às 10:30', ['NOTEBOOK']);
+  assert.match(p, /"testado" quer dizer testado e aprovado/);
+  assert.match(p, /Nunca pergunte se os testados deram defeito/);
+});

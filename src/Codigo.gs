@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.16.1';
+var VERSAO = '1.16.2';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -995,6 +995,8 @@ function promptConversa_(pessoa, faixa, categorias) {
       + 'se não der para saber qual, pergunte: ' + categorias.join(', ') + '.',
     'Se só disser a quantidade sem dizer se foi testado ou finalizado, pergunte. Não pergunte pelo que a pessoa não citou: '
       + 'se disse só finalizados, testados e defeitos são zero. Se a pessoa esquecer, ajude com perguntas curtas, uma de cada vez.',
+    'Nesta equipe, "testado" quer dizer testado e aprovado (está ok). Nunca pergunte se os testados deram defeito nem se estão ok. '
+      + 'Defeito é uma quantidade separada, só conte quando a pessoa falar em defeito; se não falar, defeitos é zero.',
     'Seja rápido: assim que entender a produção, já repita e peça a confirmação.',
     'Fale em português do Brasil, com frases curtas e naturais, porque a resposta é lida em voz alta: sem emojis, sem listas, sem markdown. '
       + 'Chame a pessoa pelo primeiro nome.',
