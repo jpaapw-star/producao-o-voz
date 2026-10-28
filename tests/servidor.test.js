@@ -9,9 +9,9 @@ function planilha() {
   return criarPlanilha({
     Registros: [
       CAB,
-      ['Outubro/2026', '06/10/2026', '08:35', 'ANA LEAL', 'NOTEBOOK', 0, 1, 0, '08:00', '09:00'],
-      ['Outubro/2026', hoje, '08:36', 'DANIEL VARGAS', 'CAIXA DE SOM', 0, 3, 0, '08:00', '09:00'],
-      ['Outubro/2026', hoje, '09:36', 'DANIEL VARGAS', 'CAIXA DE SOM', 0, 4, 0, '09:00', '10:00']
+      ['Outubro/2026', '06/10/2026', '08:35', 'ANA LEAL', 'NOTEBOOK', 0, 1, 0, '08:30', '09:30'],
+      ['Outubro/2026', hoje, '08:36', 'DANIEL VARGAS', 'CAIXA DE SOM', 0, 3, 0, '08:30', '09:30'],
+      ['Outubro/2026', hoje, '09:36', 'DANIEL VARGAS', 'CAIXA DE SOM', 0, 4, 0, '09:30', '10:30']
     ],
     'Configurações': [
       ['PESSOAS', 'CARGO', '', 'CATEGORIAS'],
@@ -51,14 +51,14 @@ test('grava no fim de Registros sem tocar no resto, e o Desfazer apaga só o que
     ]
   });
   assert.strictEqual(r.n, 2);
-  assert.strictEqual(r.faixa, '10:00 – 11:00');
+  assert.strictEqual(r.faixa, '10:30 – 11:30');
   const reg = p.getSheetByName('Registros').dados;
   assert.strictEqual(reg.length, 6);
   const nova = reg[4];
   assert.match(nova[0], /^[A-ZÇ][a-zç]+\/\d{4}$/);
   assert.match(nova[1], /^\d{2}\/\d{2}\/\d{4}$/);
   assert.match(nova[2], /^\d{2}:\d{2}$/);
-  assert.deepStrictEqual(nova.slice(3), ['JULIA GOMES', 'ROTEADOR', 4, 0, 0, '10:00', '11:00']);
+  assert.deepStrictEqual(nova.slice(3), ['JULIA GOMES', 'ROTEADOR', 4, 0, 0, '10:30', '11:30']);
 
   const log = p.getSheetByName('Lançamentos por voz').dados;
   assert.deepStrictEqual(JSON.parse(JSON.stringify(log[0])), ['ID', 'QUANDO', 'QUEM LANÇOU', 'O QUE FOI FALADO', 'LINHAS', 'DESFEITO EM']);
@@ -135,7 +135,7 @@ test('grava abaixo de linha que outro app escreveu, e lista e desfaz lançamento
   const original = reg.getLastRow;
   let chamadas = 0;
   reg.getLastRow = () => (chamadas++ === 0 ? 4 : original());
-  reg.dados.push(['Outubro/2026', 'x', '10:00', 'BRUNO', 'FONE', 1, 0, 0, '10:00', '11:00']);
+  reg.dados.push(['Outubro/2026', 'x', '10:00', 'BRUNO', 'FONE', 1, 0, 0, '10:30', '11:30']);
   const r = s.apiGravar({ quem: 'ANA LEAL', hora: 10, linhas: [{ pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', testados: 1 }] });
   reg.getLastRow = original;
   assert.strictEqual(reg.dados[4][3], 'BRUNO');
@@ -143,7 +143,7 @@ test('grava abaixo de linha que outro app escreveu, e lista e desfaz lançamento
   const hoje = JSON.parse(JSON.stringify(s.apiHoje('ana leal')));
   assert.strictEqual(hoje.length, 1);
   assert.strictEqual(hoje[0].id, r.id);
-  assert.deepStrictEqual(hoje[0].linhas[0], { pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', testados: 1, finalizados: 0, defeitos: 0, faixa: '10:00 – 11:00' });
+  assert.deepStrictEqual(hoje[0].linhas[0], { pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', testados: 1, finalizados: 0, defeitos: 0, faixa: '10:30 – 11:30' });
   s.apiDesfazer(r.id);
   assert.strictEqual(JSON.parse(JSON.stringify(s.apiHoje('ANA LEAL')))[0].desfeito, true);
 });
@@ -152,7 +152,7 @@ test('mês que aparece como número (46296) volta a ser "Outubro/2026"', () => {
   const p = planilha();
   const reg = p.getSheetByName('Registros');
   reg.dados[1][0] = 'Outubro/2026';
-  reg.dados.push([46296, '27/10/2026', '11:32', 'ANA LEAL', 'NOTEBOOK', 1, 0, 0, '11:00', '12:00']);
+  reg.dados.push([46296, '27/10/2026', '11:32', 'ANA LEAL', 'NOTEBOOK', 1, 0, 0, '11:30', '12:30']);
   const s = carregarServidor(p);
   s.apiGravar({ quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'ANA LEAL', categoria: 'FONE', testados: 1 }] });
   assert.strictEqual(reg.dados[4][0], 'Outubro/2026');
@@ -165,17 +165,17 @@ test('chamada chama só quem trabalha naquela hora (costume ou aba Horários), s
   const reg = p.getSheetByName('Registros').dados;
   const dia = (n) => new Date(Date.now() - n * 864e5);
   [1, 2, 3].forEach((n) => {
-    reg.push(['Outubro/2026', dia(n), '10:10', 'DANIEL VARGAS', 'CAIXA DE SOM', 0, 2, 0, '10:00', '11:00']);
-    reg.push(['Outubro/2026', dia(n), '14:10', 'JULIA GOMES', 'ROTEADOR', 2, 0, 0, '14:00', '15:00']);
-    reg.push(['Outubro/2026', dia(n), '10:10', 'ANA LEAL', 'NOTEBOOK', 2, 0, 0, '10:00', '11:00']);
+    reg.push(['Outubro/2026', dia(n), '10:10', 'DANIEL VARGAS', 'CAIXA DE SOM', 0, 2, 0, '10:30', '11:30']);
+    reg.push(['Outubro/2026', dia(n), '14:10', 'JULIA GOMES', 'ROTEADOR', 2, 0, 0, '14:30', '15:30']);
+    reg.push(['Outubro/2026', dia(n), '10:10', 'ANA LEAL', 'NOTEBOOK', 2, 0, 0, '10:30', '11:30']);
   });
   const s = carregarServidor(p);
   let c = JSON.parse(JSON.stringify(s.apiChamada(10)));
-  assert.strictEqual(c.faixa, '10:00 – 11:00');
+  assert.strictEqual(c.faixa, '10:30 – 11:30');
   assert.deepStrictEqual(c.faltam, ['DANIEL VARGAS']);
   assert.ok(p.getSheetByName('Horários'), 'cria a aba Horários');
 
-  reg.push(['Outubro/2026', new Date(), '10:20', 'DANIEL VARGAS', 'CAIXA DE SOM', 0, 2, 0, '10:00', '11:00']);
+  reg.push(['Outubro/2026', new Date(), '10:20', 'DANIEL VARGAS', 'CAIXA DE SOM', 0, 2, 0, '10:30', '11:30']);
   c = JSON.parse(JSON.stringify(s.apiChamada(10)));
   assert.deepStrictEqual(c.faltam, []);
   assert.deepStrictEqual(c.feitos, ['DANIEL VARGAS']);
@@ -198,7 +198,7 @@ test('chamada chama só quem trabalha naquela hora (costume ou aba Horários), s
   assert.deepStrictEqual(c.faltam, []);
   assert.deepStrictEqual(c.nada, ['JULIA GOMES']);
   const cham = p.getSheetByName('Chamada').dados;
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(cham[1].slice(2))), ['10:00 – 11:00', 'JULIA GOMES', 'nada']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(cham[1].slice(2))), ['10:30 – 11:30', 'JULIA GOMES', 'nada']);
   hor.push(['DANIEL VARGAS', '08:00', '18:00']);
   s.apiResposta({ pessoa: 'DANIEL VARGAS', hora: 9, resposta: 'não veio' });
   c = JSON.parse(JSON.stringify(s.apiChamada(11)));
@@ -235,9 +235,24 @@ test('agenda da chamada: salva na aba, em ordem, e volta no início', () => {
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().agenda)), []);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiSalvarAgenda(['16:50', '9:50', '10h05', '09:50']))), ['09:50', '10:05', '16:50']);
   const ag = p.getSheetByName('Agenda da chamada').dados;
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(ag.slice(1))), [['09:50', '09:00 – 10:00'], ['10:05', '09:00 – 10:00'], ['16:50', '16:00 – 17:00']]);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(ag.slice(1))), [['09:50', '09:30 – 10:30'], ['10:05', '09:30 – 10:30'], ['16:50', '16:30 – 17:30']]);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().agenda)), ['09:50', '10:05', '16:50']);
   s.apiSalvarAgenda(['11:50']);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().agenda)), ['11:50'], 'tirar um horário apaga a linha');
   assert.throws(() => s.apiSalvarAgenda(['25:00']), /inválido/);
+});
+
+test('faixas de meia em meia hora: 07:30 – 08:30; lançamento antigo em hora cheia conta na faixa da meia hora anterior', () => {
+  const s = carregarServidor(planilha());
+  assert.strictEqual(s.faixaDe_('07:30'), 7);
+  assert.strictEqual(s.faixaDe_('08:00'), 7);
+  assert.strictEqual(s.faixaDe_('08:29'), 7);
+  assert.strictEqual(s.faixaDe_('00:10'), 23);
+  assert.strictEqual(s.horaDaAgenda_('07:30'), 6);
+  assert.strictEqual(s.horaDaAgenda_('08:30'), 7);
+  assert.strictEqual(s.horaDaAgenda_('16:30'), 15);
+  assert.strictEqual(s.horaDaAgenda_('16:45'), 16);
+  assert.strictEqual(s.faixaDaAgenda_('08:30'), '07:30 – 08:30');
+  const r = s.apiGravar({ quem: 'ANA LEAL', hora: 7, linhas: [{ pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', testados: 1 }] });
+  assert.strictEqual(r.faixa, '07:30 – 08:30');
 });
