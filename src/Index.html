@@ -534,62 +534,22 @@
       return pt.length ? pt : todas;
     } catch (e) { return []; }
   }
-  // Vozes naturais do Google (Chirp 3 HD): só aparecem com a chave ligada; a mesma voz em todos os aparelhos que a escolherem.
-  var NATURAIS = [['Aoede', 'feminina'], ['Kore', 'feminina'], ['Leda', 'feminina'], ['Zephyr', 'feminina'],
-    ['Charon', 'masculina'], ['Fenrir', 'masculina'], ['Orus', 'masculina'], ['Puck', 'masculina']];
-  function vozEscolhida() {
-    var v = guardar.ler('voz');
-    if (!v && estado.dados && estado.dados.vozNatural) return 'google:Aoede';
-    return v;
-  }
-  function vozGoogle() {
-    var v = vozEscolhida();
-    return estado.dados && estado.dados.vozNatural && /^google:/.test(v) ? v.slice(7) : '';
-  }
   function preencherVozes() {
-    var sel = $('voz'), lista = vozes(), atual = vozEscolhida();
-    var natural = estado.dados && estado.dados.vozNatural;
-    if (!lista.length && !natural) return;
+    var sel = $('voz'), lista = vozes(), atual = guardar.ler('voz');
+    if (!lista.length) return;
     sel.innerHTML = '';
-    if (natural) NATURAIS.forEach(function (n) {
-      var o = el('option', '', n[0] + ' · natural do Google (' + n[1] + ')'); o.value = 'google:' + n[0];
-      if (o.value === atual) o.selected = true; sel.appendChild(o);
-    });
-    var padrao = el('option', '', 'Voz padrão do aparelho'); padrao.value = 'aparelho'; sel.appendChild(padrao);
-    if (atual === 'aparelho') padrao.selected = true;
+    sel.appendChild(el('option', '', 'Voz padrão do aparelho')).value = '';
     lista.forEach(function (v) { var o = el('option', '', v.name.replace(/^Microsoft\s+/, '').replace(/\s+-\s+.*$/, '') + (/^pt-PT/i.test(v.lang) ? ' (Portugal)' : '')); o.value = v.name; if (v.name === atual) o.selected = true; sel.appendChild(o); });
   }
   try { window.speechSynthesis.onvoiceschanged = preencherVozes; } catch (e) {}
   $('voz').onchange = function () { guardar.por('voz', this.value); falar('Esta é a voz da chamada.'); };
   $('ouvirVoz').onclick = function () { falar('Esta é a voz da chamada.'); };
 
-  // Fala a frase. "emMs": daqui a quanto tempo (para todos falarem juntos). A voz do Google é buscada já, e toca na hora;
-  // se a internet ou a voz natural falhar, fala com a voz do aparelho.
-  var audios = {};
-  function falar(texto, emMs) {
-    var hora = Date.now() + (emMs || 0);
-    var depois = function (f) { setTimeout(f, Math.max(0, hora - Date.now())); };
-    var g = vozGoogle();
-    if (!g) { depois(function () { falarAparelho(texto); }); return; }
-    var chave = g + '|' + texto;
-    (audios[chave] ? Promise.resolve(audios[chave]) : chamar('apiVoz', texto, g)).then(function (b64) {
-      audios[chave] = b64;
-      depois(function () {
-        try {
-          window.speechSynthesis.cancel();
-          if (falar.tocando) falar.tocando.pause();
-          var a = falar.tocando = new Audio(/^data:/.test(b64) ? b64 : 'data:audio/mpeg;base64,' + b64);
-          var p = a.play();
-          if (p && p.catch) p.catch(function () { falarAparelho(texto); });
-        } catch (e) { falarAparelho(texto); }
-      });
-    }).catch(function () { depois(function () { falarAparelho(texto); }); });
-  }
-  function falarAparelho(texto) {
+  function falar(texto) {
     try {
       var u = new SpeechSynthesisUtterance(texto);
       u.lang = 'pt-BR'; u.rate = 0.95;
-      var nome = vozEscolhida();
+      var nome = guardar.ler('voz');
       var v = nome && vozes().filter(function (x) { return x.name === nome; })[0];
       if (v) { u.voice = v; u.lang = v.lang; }
       window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
@@ -605,7 +565,7 @@
     anuncio.ultimo = a.id; anuncio.quando = Date.now();
     var falta = a.falarEm - (Date.now() + anuncio.ajuste);
     if (falta < -4000) return;
-    falar(a.texto, Math.max(0, falta));
+    setTimeout(function () { falar(a.texto); }, Math.max(0, falta));
   }
   function anunciar(texto) {
     var t0 = Date.now();

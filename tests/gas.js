@@ -80,8 +80,7 @@ function carregarServidor(planilha, opcoes = {}) {
       CopyPasteType: { PASTE_FORMAT: 'f' }
     },
     PropertiesService: { getScriptProperties: () => ({ getProperty: () => null }) },
-    CacheService: { getScriptCache: () => ({ get: (k) => cache[k] || null, put: (k, v) => { cache[k] = v; }, remove: (k) => { delete cache[k]; },
-      putAll: (o) => Object.assign(cache, o), getAll: (ks) => Object.fromEntries(ks.filter((k) => k in cache).map((k) => [k, cache[k]])) }) },
+    CacheService: { getScriptCache: () => ({ get: (k) => cache[k] || null, put: (k, v) => { cache[k] = v; } }) },
     LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
     Utilities: {
       formatDate: (d, tz, f) => formatar(opcoes.agora && d.getTime() > Date.now() - 1000 ? opcoes.agora : d, tz, f),
@@ -91,16 +90,8 @@ function carregarServidor(planilha, opcoes = {}) {
         return new Date(Date.UTC(+m[3], +m[2] - 1, +m[1], +m[4] + 3, +m[5], +m[6]));
       }
     },
-    HtmlService: {},
-    UrlFetchApp: { fetch: (url, o) => (opcoes.fetch ? opcoes.fetch(url, o) : { getResponseCode: () => 500, getContentText: () => '{}' }) }
+    HtmlService: {}
   };
-  Object.assign(ctx.Utilities, {
-    DigestAlgorithm: { MD5: 'md5' }, Charset: { UTF_8: 'utf8' },
-    computeDigest: (_, t) => Array.from(require('crypto').createHash('md5').update(t).digest()),
-    base64EncodeWebSafe: (b) => Buffer.from(b).toString('base64url'),
-    base64Encode: (b) => Buffer.from(b.map((x) => x & 255)).toString('base64'),
-    base64Decode: (t) => Array.from(Buffer.from(t, 'base64')).map((x) => (x > 127 ? x - 256 : x))
-  });
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', 'Codigo.gs'), 'utf8'), ctx);
   return ctx;
