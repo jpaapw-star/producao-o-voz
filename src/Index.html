@@ -146,6 +146,7 @@
   <div id="chamadaVez"></div>
   <div id="chamadaLista"></div>
   <label class="chave"><span>Chamar sozinho aos 50 minutos de cada hora</span><input type="checkbox" id="chamarSozinho"></label>
+  <div class="chave"><select id="voz" class="trocar" style="margin:0;flex:1;min-width:0"></select><button id="ouvirVoz" class="pilula" style="flex-shrink:0">Ouvir</button></div>
   <div class="chave"><select id="testeNome" class="trocar" style="margin:0;flex:1;min-width:0"></select><button id="testar" class="pilula" style="flex-shrink:0">Testar</button></div>
   <div class="dica">Deixe o app aberto neste aparelho, com o som ligado. Cada resposta fica na aba Chamada da planilha. Ele fala, um de cada vez, o nome de quem está no horário e ainda não lançou a hora. O horário vem da aba Horários; quem não está lá, pelo costume das últimas 2 semanas.</div>
 </div>
@@ -193,7 +194,7 @@
       // Diferença entre o relógio do servidor e o do aparelho, para a faixa seguir a hora certa.
       estado.ajusteHora = d.hora - new Date().getHours();
       abrirLancar();
-      mostrarFila(); enviarFila();
+      mostrarFila(); enviarFila(); pedirToqueParaSom();
     }).catch(function (e) {
       tela('tErro'); $('erroInicio').textContent = mensagem(e);
     });
@@ -517,10 +518,32 @@
     if (chamada.rodando) proximaVez(PAUSA);
   }
 
+  // Voz escolhida neste aparelho (cada aparelho tem as suas; as "Natural"/"Online" do Edge são as mais humanas).
+  function vozes() {
+    try {
+      var todas = window.speechSynthesis.getVoices() || [];
+      var pt = todas.filter(function (v) { return /^pt/i.test(v.lang); });
+      return pt.length ? pt : todas;
+    } catch (e) { return []; }
+  }
+  function preencherVozes() {
+    var sel = $('voz'), lista = vozes(), atual = guardar.ler('voz');
+    if (!lista.length) return;
+    sel.innerHTML = '';
+    sel.appendChild(el('option', '', 'Voz padrão do aparelho')).value = '';
+    lista.forEach(function (v) { var o = el('option', '', v.name.replace(/^Microsoft\s+/, '').replace(/\s+-\s+.*$/, '') + (/^pt-PT/i.test(v.lang) ? ' (Portugal)' : '')); o.value = v.name; if (v.name === atual) o.selected = true; sel.appendChild(o); });
+  }
+  try { window.speechSynthesis.onvoiceschanged = preencherVozes; } catch (e) {}
+  $('voz').onchange = function () { guardar.por('voz', this.value); falar('Esta é a voz da chamada.'); };
+  $('ouvirVoz').onclick = function () { falar('Esta é a voz da chamada.'); };
+
   function falar(texto) {
     try {
       var u = new SpeechSynthesisUtterance(texto);
       u.lang = 'pt-BR'; u.rate = 0.95;
+      var nome = guardar.ler('voz');
+      var v = nome && vozes().filter(function (x) { return x.name === nome; })[0];
+      if (v) { u.voice = v; u.lang = v.lang; }
       window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
     } catch (e) {}
   }
@@ -543,7 +566,7 @@
     }).catch(function () { falar(texto); });
   }
   function ouvirAnuncio() {
-    if (!estado.dados || !ligada() || document.hidden || chamada.rodando) return;
+    if (!estado.dados || !ligada() || escondidoNoCelular() || chamada.rodando) return;
     var t0 = Date.now();
     chamar('apiAnuncio').then(function (r) {
       acertarRelogio(r.agora, t0);
@@ -553,11 +576,10 @@
       if ($('tChamada').classList.contains('ativa')) conferirFila();
     }).catch(function () {});
   }
-  // Consulta rápida (2 s) perto dos 50 minutos ou logo depois de um anúncio; no resto da hora, a cada 30 s.
+  // Consulta a cada 2 s, para todos falarem juntos mesmo quando alguém aperta Chamada fora dos 50 minutos.
   var ultimaConsulta = 0;
   setInterval(function () {
-    var min = new Date().getMinutes(), perto = min >= 49 || Date.now() - anuncio.quando < 180000;
-    if (Date.now() - ultimaConsulta < (perto ? 2000 : 30000)) return;
+    if (Date.now() - ultimaConsulta < 2000) return;
     ultimaConsulta = Date.now();
     ouvirAnuncio();
   }, 1000);
@@ -627,6 +649,7 @@
   function abrirChamada(auto, forcar) {
     if (forcar || !$('tLancar').classList.contains('ativa') || !$('fala').value.trim()) tela('tChamada');
     if (auto) chamada.auto = true;
+    preencherVozes();
     var sel = $('testeNome');
     if (!sel.options.length && estado.dados) {
       sel.appendChild(el('option', '', 'Testar com…')).value = '';
@@ -642,12 +665,11 @@
       chamada.fila = r.faltam.filter(function (n) { return naFila.indexOf(n) < 0 && chamada.semResposta.indexOf(n) < 0; })
         .sort(function (x, y) { return (chamada.vezes[x] || 0) - (chamada.vezes[y] || 0); });
       guardarListas(r);
-      if (!$('tChamada').classList.contains('ativa')) {
-        if (chamada.fila.length) avisar('Chamada: faltam ' + chamada.fila.length + ' na faixa ' + r.faixa + '.', 'Abrir', function () { abrirChamada(true, true); }, 60000);
-        return;
-      }
+      // A chamada fala mesmo com outra tela aberta; quem está lançando só vê um aviso para abrir.
+      if (!$('tChamada').classList.contains('ativa') && chamada.fila.length)
+        avisar('Chamada: faltam ' + chamada.fila.length + ' na faixa ' + r.faixa + '.', 'Abrir', function () { tela('tChamada'); desenharChamada(); }, 60000);
       // Só fala o aparelho com "Chamar sozinho" ligado, e só um por hora (o primeiro que pede). Os outros ficam em silêncio.
-      var pedir = ligada() ? chamar('apiChamador', aparelho, chamada.hora) : Promise.resolve(false);
+      var pedir = ligada() ? chamar('apiChamador', aparelho, chamada.hora, !!forcar) : Promise.resolve(false);
       return pedir.then(function (ok) {
         chamada.mudo = !ok;
         desenharChamada();
@@ -660,7 +682,7 @@
   function desenharChamada() {
     var faltam = chamada.fila.length;
     $('chamadaFaixa').textContent = 'Faixa ' + chamada.faixa + ' · ' +
-      (faltam ? (faltam === 1 ? 'falta 1' : 'faltam ' + faltam) : (chamada.feitos.length + chamada.nada.length + chamada.naoVieram.length + chamada.semResposta.length ? 'chamada terminada' : 'ninguém no horário')) +
+      (faltam ? (faltam === 1 ? '1 aguardando' : faltam + ' aguardando') : (chamada.feitos.length + chamada.nada.length + chamada.naoVieram.length + chamada.semResposta.length ? 'chamada terminada' : 'ninguém no horário')) +
       (chamada.feitos.length ? ' · ' + chamada.feitos.length + (chamada.feitos.length === 1 ? ' já lançou' : ' já lançaram') : '') +
       (chamada.nada.length ? ' · ' + chamada.nada.length + ' sem produção' : '') +
       (chamada.mudo ? ' · em silêncio neste aparelho (toque no seu nome para responder)' : '');
@@ -701,12 +723,12 @@
     }
     var lista = $('chamadaLista'); lista.innerHTML = '';
     var l = el('div', 'lista');
-    [[chamada.fila.slice(1), 'falta'], [chamada.semResposta, 'não respondeu'], [chamada.feitos, 'lançou'], [chamada.nada, 'nada nesta hora'],
+    [[chamada.fila.slice(1), 'aguardando'], [chamada.semResposta, 'não respondeu'], [chamada.feitos, 'lançou'], [chamada.nada, 'nada nesta hora'],
       [chamada.naoVieram, 'não veio'], [chamada.faltas, 'falta no dia']].forEach(function (g) {
       g[0].forEach(function (n) {
         var d = el('div', 'linha'); d.appendChild(el('span', '', bonito(n))); d.appendChild(el('span', '', g[1]));
         // Tocar num nome que falta traz a pessoa para a vez (ex.: no celular, a pessoa responde por ela mesma).
-        if (g[1] === 'falta' || g[1] === 'não respondeu') { d.style.cursor = 'pointer'; d.onclick = function () {
+        if (g[1] === 'aguardando' || g[1] === 'não respondeu') { d.style.cursor = 'pointer'; d.onclick = function () {
           clearTimeout(chamada.timer);
           chamada.semResposta = chamada.semResposta.filter(function (x) { return x !== n; });
           chamada.fila = [n].concat(chamada.fila.filter(function (x) { return x !== n; })); desenharChamada(); window.scrollTo(0, 0);
@@ -733,6 +755,15 @@
   // Chamada sozinha: uma vez por hora, a partir dos 50 minutos, com o app aberto.
   // Vem ligada ao abrir o app; só desliga se alguém desmarcar neste aparelho.
   function ligada() { return guardar.ler('chamarSozinho') !== '0'; }
+  // No computador a chamada fala mesmo com a aba do navegador em segundo plano; no celular, só com a tela à vista.
+  var celular = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+  function escondidoNoCelular() { return celular && document.hidden; }
+  // O navegador só deixa falar depois de um toque na página: pede esse toque uma vez ao abrir.
+  function pedirToqueParaSom() {
+    try { if (navigator.userActivation && navigator.userActivation.hasBeenActive) return; } catch (e) {}
+    if (!ligada()) return;
+    avisar('Toque aqui para ligar a voz da chamada neste aparelho.', 'Ligar', function () { falar('Voz da chamada ligada.'); $('aviso').style.display = 'none'; }, 600000);
+  }
   var travaTela = null;
   function manterTelaAcesa() {
     // Tela acesa só no computador; no celular gastaria bateria.
@@ -747,7 +778,7 @@
   manterTelaAcesa();
   setInterval(function () {
     // Tela apagada (celular no bolso) não chama: fica para o aparelho que está à vista.
-    if (!estado.dados || !ligada() || document.hidden || new Date().getMinutes() < 50) return;
+    if (!estado.dados || !ligada() || escondidoNoCelular() || new Date().getMinutes() < 50) return;
     var vez = hojeTexto() + ' ' + horaAgora();
     if (guardar.ler('ultimaChamada') === vez) return;
     guardar.por('ultimaChamada', vez);

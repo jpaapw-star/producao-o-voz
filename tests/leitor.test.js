@@ -317,3 +317,15 @@ test('lista grande continua rápida', () => {
   l.ler('Julia 3 notebooks testados 2 teclados finalizados um teclado perfeito '.repeat(4), 'JOÃO PEDRO');
   assert.ok(Date.now() - t < 500, 'demorou ' + (Date.now() - t) + ' ms');
 });
+
+test('frase real: "controle nintendo", item sem número e "atualizada" no lugar de finalizada', () => {
+  const cats = ['CONTROLE', 'CONTROLE REMOTO', 'NINTENDO SWITCH OLED', 'FONE', 'FONE DE OUVIDO', 'CARREGADOR PORTÁTIL', 'ANTENA',
+    'CAIXA DE SOM', 'CABO USB', 'CABO MICRO USB'];
+  const l = L.criarLeitor({ pessoas: ['ANA CLARA'], categorias: cats, habitos: {}, ativos: [] });
+  const r = l.ler('Ana Clara fone com fone de ouvido finalizado Uma carregador portatiu finalizada Uma antena finalizada uma caixa de som Atualizada Um cabo micro USB finalizado Um controle nintendo finalizado', '');
+  assert.deepStrictEqual(r.linhas.map((x) => [x.categoria, x.testados, x.finalizados, x.defeitos]), [
+    ['FONE DE OUVIDO', 0, 1, 0], ['CARREGADOR PORTÁTIL', 0, 1, 0], ['ANTENA', 0, 1, 0], ['CAIXA DE SOM', 0, 1, 0],
+    ['CABO MICRO USB', 0, 1, 0], ['CONTROLE', 0, 1, 0]]);
+  assert.strictEqual(l.ler('Ana Clara 2 nintendo switch finalizados', '').linhas[0].categoria, 'NINTENDO SWITCH OLED');
+  assert.strictEqual(l.ler('Ana Clara 3 controles remotos testados', '').linhas[0].categoria, 'CONTROLE REMOTO');
+});

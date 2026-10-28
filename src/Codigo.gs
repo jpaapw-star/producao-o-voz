@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.8.0';
+var VERSAO = '1.8.2';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -601,7 +601,7 @@ function apiAnuncio() {
 }
 
 // Vários aparelhos com a chamada ligada: só o primeiro que pede a hora fala; os outros ficam em silêncio.
-function apiChamador(aparelho, hora) {
+function apiChamador(aparelho, hora, forcar) {
   var cfg = config_();
   var ss = abrir_(cfg);
   var tz = ss.getSpreadsheetTimeZone();
@@ -611,7 +611,8 @@ function apiChamador(aparelho, hora) {
   try {
     var cache = CacheService.getScriptCache();
     var atual = cache.get(chave);
-    if (atual && atual !== String(aparelho)) return false;
+    // Quem aperta o botão Chamada assume a hora.
+    if (atual && atual !== String(aparelho) && !forcar) return false;
     cache.put(chave, String(aparelho), 3600);
     return true;
   } finally {
