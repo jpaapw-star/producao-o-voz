@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.12.0';
+var VERSAO = '1.12.1';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -648,7 +648,19 @@ function apiResposta(pedido) {
   }
   var agora = new Date();
   var dia = Utilities.formatDate(agora, tz, 'dd/MM/yyyy');
-  aba.appendRow([Utilities.formatDate(agora, tz, 'HH:mm'), dia, f.inicio + ' – ' + f.fim, pessoa, pedido.resposta]);
+  var trava = LockService.getScriptLock();
+  trava.waitLock(10000);
+  try {
+    // Vários aparelhos chamam juntos: "não respondeu" da mesma pessoa e faixa no dia entra uma vez só.
+    if (pedido.resposta === 'não respondeu') {
+      var ult = aba.getLastRow(), de = Math.max(2, ult - 200);
+      var repetida = ult >= 2 && aba.getRange(de, 1, ult - de + 1, CHAMADA_CABECALHO.length).getDisplayValues().some(function (r) {
+        return dataTexto_(r[1], tz) === dataTexto_(dia, tz) && r[2] === f.inicio + ' – ' + f.fim && semAcento_(r[3]) === semAcento_(pessoa) && r[4] === 'não respondeu';
+      });
+      if (repetida) return { ok: true };
+    }
+    aba.appendRow([Utilities.formatDate(agora, tz, 'HH:mm'), dia, f.inicio + ' – ' + f.fim, pessoa, pedido.resposta]);
+  } finally { trava.releaseLock(); }
   if (pedido.resposta !== 'não respondeu') return { ok: true };
   // Duas horas do dia sem responder: falta no dia (a chamada não chama mais essa pessoa hoje).
   var hoje = dataTexto_(dia, tz), alvo = semAcento_(pessoa), faixas = {}, jaTem = false;

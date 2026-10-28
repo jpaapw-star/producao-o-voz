@@ -573,43 +573,12 @@
     } catch (e) {}
   }
 
-  // Todos os aparelhos com a chamada ligada falam juntos: quem comanda publica a frase com a hora de falar
-  // (relógio do servidor); os outros consultam e falam no mesmo instante.
-  var anuncio = { ultimo: null, ajuste: 0, quando: 0 };
-  function acertarRelogio(agoraServidor, t0) { anuncio.ajuste = agoraServidor - (t0 + Date.now()) / 2; }
-  function falarNaHora(a) {
-    if (!a || a.id === anuncio.ultimo) return;
-    anuncio.ultimo = a.id; anuncio.quando = Date.now();
-    var falta = a.falarEm - (Date.now() + anuncio.ajuste);
-    if (falta < -4000) return;
-    setTimeout(function () { falar(a.texto); }, Math.max(0, falta));
-  }
-  function anunciar(texto) {
-    var t0 = Date.now();
-    chamar('apiAnunciar', aparelho, texto).then(function (r) {
-      acertarRelogio(r.agora, t0); falarNaHora(r.anuncio);
-    }).catch(function () { falar(texto); });
-  }
-  function ouvirAnuncio() {
-    if (!estado.dados || !ligada() || escondidoNoCelular()) return;
-    var t0 = Date.now();
-    chamar('apiAnuncio').then(function (r) {
-      conferirVersao(r.versao);
-      if (chamada.rodando) return;
-      acertarRelogio(r.agora, t0);
-      var a = r.anuncio;
-      if (!a || a.de === aparelho || a.id === anuncio.ultimo) return;
-      falarNaHora(a);
-      if ($('tChamada').classList.contains('ativa')) conferirFila();
-    }).catch(function () {});
-  }
-  // Consulta a cada 2 s, para todos falarem juntos mesmo quando alguém aperta Chamada fora do horário da chamada.
-  var ultimaConsulta = 0;
+  // Cada aparelho fala sozinho, com a própria voz. Todos começam juntos porque a chamada começa no segundo exato do horário.
+  // A cada 30 s confere se saiu versão nova do app.
   setInterval(function () {
-    if (Date.now() - ultimaConsulta < 2000) return;
-    ultimaConsulta = Date.now();
-    ouvirAnuncio();
-  }, 1000);
+    if (!estado.dados || document.hidden) return;
+    chamar('apiAnuncio').then(function (r) { conferirVersao(r.versao); }).catch(function () {});
+  }, 30000);
 
   function guardarListas(r) {
     chamada.feitos = r.feitos; chamada.nada = r.nada || []; chamada.naoVieram = r.naoVieram || []; chamada.faltas = r.faltas || [];
@@ -636,7 +605,6 @@
     var txt;
     if (chamada.teste) txt = chamada.proximoTexto ? chamada.proximoTexto + ' em ' + mmss : 'Teste em andamento';
     else if (chamada.rodando && chamada.proximoTexto) txt = chamada.proximoTexto + ' em ' + mmss;
-    else if (chamada.mudo && chamada.fila.length) txt = 'Outro aparelho está comandando a chamada; este fala junto.';
     else {
       var prox = proximaAgendada();
       txt = ligada() ? 'Próxima chamada às ' + prox + ' (faixa ' + faixaTexto(horaDaAgenda(prox)) + ').' : 'Chamada automática desligada neste aparelho.';
@@ -645,14 +613,14 @@
   }
   setInterval(function () { if ($('tChamada').classList.contains('ativa')) mostrarProximo(); }, 1000);
 
-  function proximaVez(ms) {
+  function proximaVez(ms, semConferir) {
     clearTimeout(chamada.timer);
     if (chamada.fila.length && chamada.rodando) planejar(ms, 'Chama ' + bonito(chamada.fila[0]) + (chamada.vezes[chamada.fila[0]] ? ' (segunda chamada)' : ''));
     if (!chamada.fila.length) {
-      if (chamada.rodando) { chamada.rodando = false; chamada.proximoTexto = ''; anunciar('Chamada terminada.'); mostrarProximo(); }
+      if (chamada.rodando) { chamada.rodando = false; chamada.proximoTexto = ''; falar('Chamada terminada.'); mostrarProximo(); }
       return;
     }
-    chamada.timer = setTimeout(chamarVez, ms);
+    chamada.timer = setTimeout(semConferir ? falarVez : chamarVez, ms);
   }
 
   function chamarVez() {
@@ -668,7 +636,7 @@
     chamada.vezes[nome] = (chamada.vezes[nome] || 0) + 1;
     var curto = bonito(nome.split(/\s+/).slice(0, 2).join(' '));
     var frase = curto + ', falta a sua produção das ' + chamada.hora + ' e meia às ' + ((chamada.hora + 1) % 24) + ' e meia.' + (chamada.vezes[nome] > 1 ? ' Segunda chamada.' : '');
-    if (nome === chamada.teste) falar(frase); else anunciar(frase);
+    falar(frase);
     desenharChamada();
     chamada.timer = setTimeout(semResposta, ESPERA);
     var depois = chamada.fila[1];
@@ -718,14 +686,16 @@
       // A chamada fala mesmo com outra tela aberta; quem está lançando só vê um aviso para abrir.
       if (!$('tChamada').classList.contains('ativa') && chamada.fila.length)
         avisar('Chamada: faltam ' + chamada.fila.length + ' na faixa ' + r.faixa + '.', 'Abrir', function () { tela('tChamada'); desenharChamada(); }, 60000);
-      // Só fala o aparelho com "Chamar sozinho" ligado, e só um por hora (o primeiro que pede). Os outros ficam em silêncio.
-      var pedir = ligada() ? chamar('apiChamador', aparelho, chamada.hora, !!forcar) : Promise.resolve(false);
-      return pedir.then(function (ok) {
-        chamada.mudo = !ok;
-        desenharChamada();
-        if (ok && chamada.fila.length && (auto || forcar || chamada.voltarFalando)) { chamada.rodando = true; proximaVez(chamada.voltarFalando ? PAUSA : 0); }
-        chamada.voltarFalando = false;
-      });
+      // Fala todo aparelho com "Chamar sozinho" ligado.
+      desenharChamada();
+      // Chamada do horário: o primeiro nome sai 5 s depois do horário exato, igual em todos os aparelhos (a lista acabou de vir).
+      if (ligada() && chamada.fila.length && (auto || forcar || chamada.voltarFalando)) {
+        chamada.rodando = true;
+        if (auto && chamada.falarEm) proximaVez(Math.max(0, chamada.falarEm - Date.now()), true);
+        else proximaVez(chamada.voltarFalando ? PAUSA : 0);
+      }
+      chamada.falarEm = 0;
+      chamada.voltarFalando = false;
     }).catch(function (e) { $('chamadaFaixa').textContent = mensagem(e); });
   }
 
@@ -735,7 +705,7 @@
       (faltam ? (faltam === 1 ? '1 aguardando' : faltam + ' aguardando') : (chamada.feitos.length + chamada.nada.length + chamada.naoVieram.length + chamada.semResposta.length ? 'chamada terminada' : 'ninguém no horário')) +
       (chamada.feitos.length ? ' · ' + chamada.feitos.length + (chamada.feitos.length === 1 ? ' já lançou' : ' já lançaram') : '') +
       (chamada.nada.length ? ' · ' + chamada.nada.length + ' sem produção' : '') +
-      (chamada.mudo ? ' · em silêncio neste aparelho (toque no seu nome para responder)' : '');
+      '';
     var vez = $('chamadaVez'); vez.innerHTML = '';
     if (faltam) {
       var nome = chamada.fila[0];
@@ -839,8 +809,10 @@
     var vez = hojeTexto() + ' ' + devida;
     if (guardar.ler('ultimaChamada') === vez) return;
     guardar.por('ultimaChamada', vez);
+    var alvo = new Date(); alvo.setHours(Number(devida.slice(0, 2)), Number(devida.slice(3)), 0, 0);
+    chamada.falarEm = alvo.getTime() + 5000;
     abrirChamada(true, false, horaDaAgenda(devida));
-  }, 20000);
+  }, 1000);
 
   // Horários da chamada (aba Agenda da chamada, iguais em todos os aparelhos). Sem nenhum: 07:30, 08:30… 16:30 e 16:45.
   function agenda() { return (estado.dados && estado.dados.agenda) || []; }
