@@ -202,7 +202,7 @@
       // Diferença entre o relógio do servidor e o do aparelho, para a faixa seguir a hora certa.
       estado.ajusteHora = d.hora - faixaDoAparelho();
       abrirLancar();
-      mostrarFila(); enviarFila(); pedirToqueParaSom();
+      mostrarFila(); enviarFila(); pedirToqueParaSom(); acertarRelogio();
     }).catch(function (e) {
       tela('tErro'); $('erroInicio').textContent = mensagem(e);
     });
@@ -218,7 +218,7 @@
   }
 
   // Faixas de meia em meia hora: a faixa 7 vai das 07:30 às 08:30.
-  function faixaDoAparelho() { var d = new Date(); return (d.getHours() + (d.getMinutes() >= 30 ? 0 : -1) + 24) % 24; }
+  function faixaDoAparelho() { var d = dataCerta(); return (d.getHours() + (d.getMinutes() >= 30 ? 0 : -1) + 24) % 24; }
   function horaAgora() { return (faixaDoAparelho() + (estado.ajusteHora || 0) + 48) % 24; }
 
   // A faixa acompanha o relógio até alguém mudar à mão.
@@ -406,7 +406,7 @@
   function horaDoLancamento() {
     if (estado.horaManual || chamada.hora === null || chamada.hora === estado.hora) return estado.hora;
     // Só na primeira meia hora da faixa nova (até 16:00 para a chamada das 15:30).
-    if ((chamada.hora + 1) % 24 !== estado.hora || new Date().getMinutes() < 30) return estado.hora;
+    if ((chamada.hora + 1) % 24 !== estado.hora || dataCerta().getMinutes() < 30) return estado.hora;
     var cobrados = chamada.fila.concat(chamada.semResposta);
     var todos = estado.linhas.every(function (l) { return cobrados.indexOf(l.pessoa) >= 0; });
     return todos ? chamada.hora : estado.hora;
@@ -533,9 +533,9 @@
   // (segunda chamada, de novo todos juntos); depois disso fica "não respondeu". Duas horas do dia sem responder = falta no dia (planilha).
   var ESPERA = 120000;
   var chamada = { fila: [], vezes: {}, semResposta: [], faltas: [], feitos: [], nada: [], naoVieram: [], hora: null, faixa: '',
-    auto: false, rodando: false, rodada: 0, voltar: null, timer: null, timerTeste: null, teste: null };
+    auto: false, rodando: false, rodada: 0, acao: null, voltar: null, timerTeste: null, teste: null };
   var bonito = function (n) { return String(n).toLowerCase().replace(/(^|\s)(\S)/g, function (m, a, c) { return a + c.toUpperCase(); }); };
-  function hojeTexto() { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+  function hojeTexto() { var d = dataCerta(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
 
   // Cada resposta vai para a aba Chamada da planilha.
   function responder(nome, resposta) {
@@ -587,10 +587,45 @@
 
   // Cada aparelho fala sozinho, com a própria voz. Todos começam juntos porque a chamada começa no segundo exato do horário.
   // A cada 30 s confere se saiu versão nova do app.
-  setInterval(function () {
-    if (!estado.dados || document.hidden) return;
-    chamar('apiAnuncio').then(function (r) { conferirVersao(r.versao); }).catch(function () {});
-  }, 30000);
+  // Relógio do Google: todos os computadores marcam a chamada pelo mesmo relógio, mesmo com o relógio do PC adiantado
+  // ou atrasado. Vale a medida com a resposta mais rápida (menos erro de rede).
+  var desvio = 0, melhorIda = Infinity, relogioAcertado = false;
+  function agoraCerto() { return Date.now() + (desvio || 0); }
+  function dataCerta() { return new Date(agoraCerto()); }
+  function acertarRelogio() {
+    var ida = Date.now();
+    return chamar('apiAnuncio').then(function (r) {
+      var volta = Date.now(), rtt = volta - ida;
+      if (r && r.agora && rtt < melhorIda + 300) { desvio = r.agora + rtt / 2 - volta; melhorIda = Math.min(melhorIda, rtt); }
+      conferirVersao(r.versao);
+    }).catch(function () {}).then(function () { relogioAcertado = true; });
+  }
+  // A cada 30 s (também minimizado: o PC da sala fica com o app minimizado).
+  setInterval(function () { if (estado.dados) acertarRelogio(); }, 30000);
+  setInterval(function () { melhorIda = Infinity; }, 1800000);
+
+  // O navegador segura os relógios de páginas minimizadas (até 1 vez por minuto). Um "worker" não é segurado:
+  // ele bate 5 vezes por segundo e é ele que dispara a chamada na hora certa. Sem worker, fica o relógio normal.
+  var tiques = [];
+  function aCadaTique(f) { tiques.push(f); }
+  function tique() { tiques.forEach(function (f) { try { f(); } catch (e) {} }); }
+  (function () {
+    try {
+      var url = URL.createObjectURL(new Blob(['setInterval(function () { postMessage(0); }, 200);'], { type: 'text/javascript' }));
+      var w = new Worker(url);
+      w.onmessage = tique;
+      return;
+    } catch (e) {}
+    setInterval(tique, 200);
+  })();
+
+  // Uma ação marcada para um instante do relógio do Google (a mesma em todos os computadores).
+  function agendar(em, f) { chamada.acao = { em: em, f: f }; }
+  function cancelarAgendado() { chamada.acao = null; }
+  aCadaTique(function () {
+    var a = chamada.acao;
+    if (a && agoraCerto() >= a.em) { chamada.acao = null; a.f(); }
+  });
 
   function guardarListas(r) {
     chamada.feitos = r.feitos; chamada.nada = r.nada || []; chamada.naoVieram = r.naoVieram || []; chamada.faltas = r.faltas || [];
@@ -607,7 +642,15 @@
       conferirFim();
     }).catch(function () {});
   }
-  setInterval(function () { if ($('tChamada').classList.contains('ativa') && chamada.fila.length) conferirFila(); }, 20000);
+  // Durante a chamada, a lista acompanha os lançamentos e respostas dos outros computadores a cada 10 s (no mesmo segundo
+  // em todos, pelo relógio do Google), mesmo com outra tela aberta.
+  var ultimaConferida = 0;
+  aCadaTique(function () {
+    var vez = Math.floor(agoraCerto() / 10000);
+    if (vez === ultimaConferida) return;
+    ultimaConferida = vez;
+    if (chamada.fila.length && (chamada.rodando || $('tChamada').classList.contains('ativa'))) conferirFila();
+  });
 
   // O que vem a seguir, para mostrar na tela com contagem ("Chama Daniel em 1:30").
   function planejar(ms, texto) { chamada.proximoEm = Date.now() + ms; chamada.proximoTexto = texto; mostrarProximo(); }
@@ -624,15 +667,30 @@
     }
     caixa.textContent = 'Próximo passo: ' + txt;
   }
-  setInterval(function () { if ($('tChamada').classList.contains('ativa')) mostrarProximo(); }, 1000);
+  aCadaTique(function () { if ($('tChamada').classList.contains('ativa')) mostrarProximo(); });
 
   function nomeCurto(nome) { return bonito(nome.split(/\s+/).slice(0, 2).join(' ')); }
   function faixaFalada() { return 'das ' + chamada.hora + ' e meia às ' + ((chamada.hora + 1) % 24) + ' e meia'; }
   function pendentesReais() { return chamada.fila.filter(function (n) { return n !== chamada.teste; }); }
 
+  // 3 s antes de falar, pega a lista da vez: o primeiro computador lê a planilha (lançamentos de todos) e os outros
+  // recebem a mesma lista, para todos falarem os mesmos nomes. Sem resposta, fica a lista que já tinha.
+  function lerListaDaVez(alvo) {
+    return chamar('apiListaDaVez', chamada.hora, alvo).then(function (r) {
+      chamada.fila = r.faltam.concat(chamada.teste && r.faltam.indexOf(chamada.teste) < 0 ? [chamada.teste] : [])
+        .filter(function (n) { return chamada.semResposta.indexOf(n) < 0; });
+      guardarListas(r);
+      desenharChamada();
+    }).catch(function () {});
+  }
+  function lerEFalar(alvo) {
+    lerListaDaVez(alvo).then(function () {
+      if (chamada.rodando) agendar(alvo, function () { falarRodada(alvo); });
+    });
+  }
+
   // Fala todos os nomes que faltam numa frase só ("Falta a produção das 15 e meia às 16 e meia de: Ana, Bruno e Carla.").
-  function falarRodada() {
-    clearTimeout(chamada.timer);
+  function falarRodada(alvo) {
     var lista = pendentesReais();
     if (!lista.length) return terminarRodada();
     lista.forEach(function (n) { chamada.vezes[n] = chamada.rodada; });
@@ -640,25 +698,29 @@
     var juntos = nomes.length > 1 ? nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1] : nomes[0];
     falar((chamada.rodada > 1 ? 'Segunda chamada. ' : '') + 'Falta a produção ' + faixaFalada() + (nomes.length > 1 ? ' de: ' : ' de ') + juntos + '.');
     desenharChamada();
-    chamada.timer = setTimeout(fimDaEspera, ESPERA);
-    planejar(ESPERA, chamada.rodada > 1 ? 'Quem não responder fica "não respondeu"' : 'Quem não responder é chamado de novo');
+    var depois = alvo + ESPERA;
+    agendar(depois - 3000, function () { fimDaEspera(depois); });
+    planejar(depois - agoraCerto(), chamada.rodada > 1 ? 'Quem não responder fica "não respondeu"' : 'Quem não responder é chamado de novo');
   }
 
   // Acabaram os 2 minutos: primeira vez chama de novo quem falta; segunda vez, quem falta fica "não respondeu".
-  function fimDaEspera() {
-    conferirFila().then(function () {
+  // A lista é lida na hora, e todos os computadores falam no mesmo instante.
+  function fimDaEspera(alvo) {
+    lerListaDaVez(alvo).then(function () {
       if (!chamada.rodando) return;
-      if (chamada.rodada < 2 && pendentesReais().length) { chamada.rodada = 2; return falarRodada(); }
-      pendentesReais().forEach(function (n) { chamada.semResposta.push(n); responder(n, 'não respondeu'); });
-      chamada.fila = chamada.fila.filter(function (n) { return n === chamada.teste; });
-      terminarRodada();
+      if (chamada.rodada < 2 && pendentesReais().length) { chamada.rodada = 2; return agendar(alvo, function () { falarRodada(alvo); }); }
+      agendar(alvo, function () {
+        pendentesReais().forEach(function (n) { chamada.semResposta.push(n); responder(n, 'não respondeu'); });
+        chamada.fila = chamada.fila.filter(function (n) { return n === chamada.teste; });
+        terminarRodada();
+      });
     });
   }
 
   // Todo mundo respondeu antes do tempo: termina a chamada.
   function conferirFim() { if (chamada.rodando && !pendentesReais().length) terminarRodada(); }
   function terminarRodada() {
-    clearTimeout(chamada.timer);
+    cancelarAgendado();
     if (chamada.rodando) { chamada.rodando = false; chamada.proximoTexto = ''; falar('Chamada terminada.'); }
     desenharChamada(); mostrarProximo();
   }
@@ -699,7 +761,7 @@
     }
     desenharAgenda();
     var hora = horaPedida === undefined ? horaAgora() : horaPedida;
-    if (hora !== chamada.hora) { clearTimeout(chamada.timer); chamada.rodando = false; chamada.hora = hora; chamada.vezes = {}; chamada.semResposta = []; }
+    if (hora !== chamada.hora) { cancelarAgendado(); chamada.rodando = false; chamada.hora = hora; chamada.vezes = {}; chamada.semResposta = []; }
     $('chamadaFaixa').textContent = 'Procurando quem falta…';
     return chamar('apiChamada', chamada.hora).then(function (r) {
       chamada.faixa = r.faixa;
@@ -717,9 +779,10 @@
       // Voltar de um lançamento não recomeça a chamada: a espera de 2 minutos continua.
       if (ligada() && pendentesReais().length && ((auto && chamada.falarEm) || forcar)) {
         chamada.rodando = true; chamada.rodada = 1;
-        var ms = auto && chamada.falarEm ? Math.max(0, chamada.falarEm - Date.now()) : 0;
-        clearTimeout(chamada.timer);
-        chamada.timer = setTimeout(falarRodada, ms);
+        var falarEm = auto && chamada.falarEm ? chamada.falarEm : agoraCerto() + 3000;
+        var ms = Math.max(0, falarEm - agoraCerto());
+        // 3 s antes de falar, lê de novo quem falta, para pegar quem acabou de lançar em outro computador.
+        agendar(falarEm - 3000, function () { lerEFalar(falarEm); });
         planejar(ms, 'Chama ' + (pendentesReais().length === 1 ? '1 pessoa' : pendentesReais().length + ' pessoas'));
       }
       chamada.falarEm = 0;
@@ -790,7 +853,7 @@
   // O botão só abre a tela, com a hora que acabou (11:07 mostra 10:00 – 11:00). Falar, só nos horários da chamada.
   $('abrirChamada').onclick = function () {
     tela('tChamada');
-    var d = new Date();
+    var d = dataCerta();
     abrirChamada(false, false, horaDaAgenda(doisDigitos(d.getHours()) + ':' + doisDigitos(d.getMinutes())));
   };
   // Teste: chama a pessoa escolhida agora, sem gravar nada na aba Chamada.
@@ -830,23 +893,23 @@
   };
   document.addEventListener('visibilitychange', manterTelaAcesa);
   manterTelaAcesa();
-  setInterval(function () {
+  aCadaTique(function () {
     // Tela apagada (celular no bolso) não chama: fica para o aparelho que está à vista.
-    if (!estado.dados || !ligada() || escondidoNoCelular()) return;
+    if (!estado.dados || !relogioAcertado || !ligada() || escondidoNoCelular()) return;
     var devida = agendadaAgora();
     if (!devida) return;
     var vez = hojeTexto() + ' ' + devida;
     if (guardar.ler('ultimaChamada') === vez) return;
     guardar.por('ultimaChamada', vez);
-    var alvo = new Date(); alvo.setHours(Number(devida.slice(0, 2)), Number(devida.slice(3)), 0, 0);
+    var alvo = dataCerta(); alvo.setHours(Number(devida.slice(0, 2)), Number(devida.slice(3)), 0, 0);
     chamada.falarEm = alvo.getTime() + 5000;
     abrirChamada(true, false, horaDaAgenda(devida));
-  }, 1000);
+  });
 
   // Horários da chamada (aba Agenda da chamada, iguais em todos os aparelhos). Sem nenhum: 07:30, 08:30… 16:30 e 16:45.
   function agenda() { return (estado.dados && estado.dados.agenda) || []; }
   function minutos(h) { return Number(h.slice(0, 2)) * 60 + Number(h.slice(3)); }
-  function agoraMin() { var d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
+  function agoraMin() { var d = dataCerta(); return d.getHours() * 60 + d.getMinutes(); }
   function doisDigitos(n) { return ('0' + n).slice(-2); }
   function horarios() {
     var ag = agenda();

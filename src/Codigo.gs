@@ -775,3 +775,23 @@ function apiDesfazer(id) {
     trava.releaseLock();
   }
 }
+
+// Lista da vez da chamada: o primeiro computador a pedir lê a planilha e guarda; os outros recebem a mesma lista,
+// para todos falarem os mesmos nomes no mesmo instante. A chave é o instante da fala (igual em todos).
+function apiListaDaVez(hora, instante) {
+  var cache = CacheService.getScriptCache();
+  var chave = 'vez_' + Math.floor(Number(hora)) + '_' + Math.round(Number(instante) / 1000);
+  var pronta = cache.get(chave);
+  if (pronta) return JSON.parse(pronta);
+  var trava = LockService.getScriptLock();
+  trava.waitLock(20000);
+  try {
+    pronta = cache.get(chave);
+    if (pronta) return JSON.parse(pronta);
+    var r = apiChamada(hora);
+    cache.put(chave, JSON.stringify(r), 600);
+    return r;
+  } finally {
+    trava.releaseLock();
+  }
+}
