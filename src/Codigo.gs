@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.13.0';
+var VERSAO = '1.14.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -468,7 +468,9 @@ function horarios_(ss, l) {
   var novos = l.pessoas.filter(function (p) { return !presentes[semAcento_(p)] && chefes.indexOf(semAcento_(p)) < 0; })
     .map(function (p) { return [p, '', '', SEM]; });
   if (novos.length) aba.getRange(n + 1, 1, novos.length, 4).setValues(novos);
-  var mapa = {}, mudou = false;
+  var mapa = {}, periodos = {}, mudou = false;
+  // Entrada e saída de cada um, para a chamada não chamar quem já foi embora ou ainda não chegou.
+  Object.defineProperty(mapa, 'periodos', { value: periodos });
   var situacao = vals.map(function (r) {
     var nome = oficial[semAcento_(r[0])], de = horaDe(r[1]), ate = horaDe(r[2]);
     var vazio = !String(r[1]).trim() && !String(r[2]).trim();
@@ -476,6 +478,7 @@ function horarios_(ss, l) {
       : vazio ? SEM : de === null || ate === null || ate <= de ? 'confira entrada e saída (ex.: 08:00 e 12:00)' : 'ok';
     if (txt === 'ok') {
       var horas = mapa[nome] || (mapa[nome] = []);
+      (periodos[nome] || (periodos[nome] = [])).push([de, ate]);
       // Trabalha na faixa x (x:30 – x+1:30) se fica nela pelo menos 15 minutos.
       for (var x = 0; x < 24; x++) if (Math.min(ate, x + 1.5) - Math.max(de, x + 0.5) >= 0.25 && horas.indexOf(x) < 0) horas.push(x);
     }
@@ -486,7 +489,7 @@ function horarios_(ss, l) {
   return mapa;
 }
 
-// Agenda da chamada (aba opcional): uma hora por linha na coluna A. Vazia = 07:30, 08:30… 16:30 e 16:45.
+// Agenda da chamada (aba opcional): uma hora por linha na coluna A. Vazia = 07:30, 08:30… 16:30 (menos 13:30) e 16:45.
 // Devolve as horas em "HH:MM", em ordem e sem repetir.
 function horaAgenda_(v) {
   var m = String(v).match(/^\s*(\d{1,2})\s*(?:[:h]\s*(\d{2}))?/);
@@ -510,6 +513,22 @@ function horaDaAgenda_(h) {
   var atual = Math.floor((t - 30) / 60);
   var x = t - (atual * 60 + 30) >= 15 ? atual : atual - 1;
   return (x + 48) % 24;
+}
+// Horários da chamada: os da aba Agenda da chamada; sem nenhum, 07:30, 08:30… 16:30 (menos 13:30) e 16:45 (igual ao app).
+function horariosDaChamada_(ss) {
+  var ag = agenda_(ss);
+  if (ag.length) return ag;
+  var todas = [];
+  for (var x = 7; x <= 16; x++) if (x !== 13) todas.push(('0' + x).slice(-2) + ':30');
+  return todas.concat(['16:45']);
+}
+// Momento (em horas) em que a faixa h é cobrada: o último horário da chamada que cobra essa faixa (16:45 para 16:30 – 17:30).
+function momentoDaChamada_(ss, h) {
+  var momento = null;
+  horariosDaChamada_(ss).forEach(function (t) {
+    if (horaDaAgenda_(t) === h) momento = Number(t.slice(0, 2)) + Number(t.slice(3)) / 60;
+  });
+  return momento === null ? h + 1.5 : momento;
 }
 function faixaDaAgenda_(h) {
   var f = faixa_(horaDaAgenda_(h));
@@ -575,7 +594,23 @@ function horariosAprendidos_(aba, col, ultima, tz, pessoas) {
 }
 
 // Chamada: quem trabalhou nos últimos 7 dias (menos supervisores) e ainda não tem linha hoje na faixa pedida.
-function apiChamada(hora) {
+// Quem já mandou a faixa h (h:30 – h+1:30), por qualquer app:
+// - INÍCIO na faixa (este app);
+// - INÍCIO – FIM cobrindo pelo menos 30 minutos da faixa (o outro app grava hora cheia: 11:00 – 12:00 vale 10:30 – 11:30 e 11:30 – 12:30);
+// - registrado na meia hora depois do fim da faixa (respondendo à chamada, mesmo com a faixa errada).
+function horasDe_(v) {
+  var m = String(v).match(/(\d{1,2})\s*[:h]\s*(\d{2})/);
+  return m ? Number(m[1]) + Number(m[2]) / 60 : null;
+}
+function lancouNaFaixa_(r, col, h) {
+  if (faixaDe_(r[col.inicio]) === h) return true;
+  var ini = horasDe_(r[col.inicio]), fim = horasDe_(r[col.fim]);
+  if (ini !== null && fim !== null && fim > ini && Math.min(fim, h + 1.5) - Math.max(ini, h + 0.5) >= 0.5) return true;
+  var reg = col.hora === undefined ? null : horasDe_(r[col.hora]);
+  return reg !== null && reg >= h + 1.5 && reg < h + 2;
+}
+
+function apiChamada(hora, instante) {
   var cfg = config_();
   var ss = abrir_(cfg);
   var tz = ss.getSpreadsheetTimeZone();
@@ -588,9 +623,22 @@ function apiChamada(hora) {
   var chefes = l.supervisores.map(semAcento_);
   var h = Math.floor(Number(hora));
   var fixos = horarios_(ss, l), aprendidos = horariosAprendidos_(aba, col, ultima, tz, l.pessoas);
+  // Pela aba Horários, só chama quem está no trabalho na hora da chamada (até 10 minutos depois da saída):
+  // quem sai 12:45 não é chamado às 13:30.
+  var momento = momentoDaChamada_(ss, h);
+  // Chamando de novo mais tarde: vale quem ainda está no trabalho agora (quem saiu para de ser chamado).
+  if (instante) {
+    var agoraTxt = Utilities.formatDate(new Date(Number(instante)), tz, 'HH:mm');
+    momento = Math.max(momento, Number(agoraTxt.slice(0, 2)) + Number(agoraTxt.slice(3)) / 60);
+  }
+  var presente = function (p) {
+    var per = fixos.periodos[p];
+    return !per || per.some(function (x) { return x[0] <= momento && momento <= x[1] + 10 / 60; });
+  };
   // Só chama quem trabalha nessa hora: pela aba Horários; quem não está lá, pelo costume das últimas 2 semanas.
   var ativos = habitos_(aba, col, ultima, tz, l.pessoas).ativos.filter(function (p) {
     if (chefes.indexOf(semAcento_(p)) >= 0) return false;
+    if (!presente(p)) return false;
     var horas = fixos[p] || aprendidos[p] || [];
     return horas.indexOf(h) >= 0;
   });
@@ -600,11 +648,11 @@ function apiChamada(hora) {
     var hoje = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
     aba.getRange(de, 1, ultima - de + 1, col.largura).getDisplayValues().forEach(function (r) {
       if (dataTexto_(r[col.data], tz) !== hoje) return;
-      if (faixaDe_(r[col.inicio]) === h) feitos[semAcento_(r[col.pessoa])] = true;
+      if (lancouNaFaixa_(r, col, h)) feitos[semAcento_(r[col.pessoa])] = true;
     });
   }
   // Respostas de hoje na aba Chamada: "nada" vale para a faixa; "não veio" vale para o dia todo.
-  var nada = {}, foraHoje = {}, faltou = {};
+  var nada = {}, foraHoje = {};
   var cham = ss.getSheetByName(CHAMADA_ABA);
   if (cham && cham.getLastRow() > 1) {
     var hojeIso = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
@@ -613,7 +661,7 @@ function apiChamada(hora) {
       if (dataTexto_(r[1], tz) !== hojeIso) return;
       var p = semAcento_(r[3]);
       if (r[4] === 'não veio') foraHoje[p] = true;
-      if (r[4] === 'falta') { foraHoje[p] = true; faltou[p] = true; }
+      // Linhas "falta" antigas (marcadas sozinhas até a 1.13.1) não contam mais.
       if (r[4] === 'nada' && String(r[2]).indexOf(f.inicio) === 0) nada[p] = true;
     });
   }
@@ -623,8 +671,8 @@ function apiChamada(hora) {
     faltam: lista(function (p) { return !feitos[p] && !nada[p] && !foraHoje[p]; }),
     feitos: lista(function (p) { return feitos[p]; }),
     nada: lista(function (p) { return !feitos[p] && nada[p]; }),
-    naoVieram: lista(function (p) { return !feitos[p] && !nada[p] && foraHoje[p] && !faltou[p]; }),
-    faltas: lista(function (p) { return !feitos[p] && !nada[p] && faltou[p]; })
+    naoVieram: lista(function (p) { return !feitos[p] && !nada[p] && foraHoje[p]; }),
+    faltas: []
   };
 }
 
@@ -661,18 +709,8 @@ function apiResposta(pedido) {
     }
     aba.appendRow([Utilities.formatDate(agora, tz, 'HH:mm'), dia, f.inicio + ' – ' + f.fim, pessoa, pedido.resposta]);
   } finally { trava.releaseLock(); }
-  if (pedido.resposta !== 'não respondeu') return { ok: true };
-  // Duas horas do dia sem responder: falta no dia (a chamada não chama mais essa pessoa hoje).
-  var hoje = dataTexto_(dia, tz), alvo = semAcento_(pessoa), faixas = {}, jaTem = false;
-  var n = aba.getLastRow(), ini = Math.max(2, n - 500);
-  aba.getRange(ini, 1, n - ini + 1, CHAMADA_CABECALHO.length).getDisplayValues().forEach(function (r) {
-    if (dataTexto_(r[1], tz) !== hoje || semAcento_(r[3]) !== alvo) return;
-    if (r[4] === 'não respondeu') faixas[r[2]] = true;
-    if (r[4] === 'falta') jaTem = true;
-  });
-  if (jaTem || Object.keys(faixas).length < 2) return { ok: true };
-  aba.appendRow([Utilities.formatDate(agora, tz, 'HH:mm'), dia, f.inicio + ' – ' + f.fim, pessoa, 'falta']);
-  return { ok: true, falta: true };
+  // Falta nunca é marcada sozinha (pedido do João Pedro): só "Não veio hoje", tocado por alguém, tira a pessoa do dia.
+  return { ok: true };
 }
 
 // Fala sincronizada: o aparelho que comanda a chamada publica o texto com a hora certa de falar (relógio do servidor);
@@ -788,7 +826,7 @@ function apiListaDaVez(hora, instante) {
   try {
     pronta = cache.get(chave);
     if (pronta) return JSON.parse(pronta);
-    var r = apiChamada(hora);
+    var r = apiChamada(hora, instante);
     cache.put(chave, JSON.stringify(r), 600);
     return r;
   } finally {

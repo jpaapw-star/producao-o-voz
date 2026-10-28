@@ -180,6 +180,14 @@ test('chamada chama só quem trabalha naquela hora (costume ou aba Horários), s
   assert.deepStrictEqual(c.faltam, []);
   assert.deepStrictEqual(c.feitos, ['DANIEL VARGAS']);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(14))).faltam, ['JULIA GOMES']);
+  // Outro app grava hora cheia (14:00 – 15:00): conta para 13:30 – 14:30 e 14:30 – 15:30.
+  reg.push(['Outubro/2026', new Date(), '14:20', 'JULIA GOMES', 'ROTEADOR', 1, 0, 0, '14:00', '15:00']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(14))).faltam, []);
+  reg.pop();
+  // Lançado 15:40 (logo depois da chamada das 15:30) com a faixa 15:30 – 16:30: conta para 14:30 – 15:30.
+  reg.push(['Outubro/2026', new Date(), '15:40', 'JULIA GOMES', 'ROTEADOR', 1, 0, 0, '15:30', '16:30']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(14))).faltam, []);
+  reg.pop();
 
   // Lista da vez: o primeiro a pedir fixa a lista; os outros computadores recebem a mesma, mesmo com lançamento novo.
   const vez1 = JSON.parse(JSON.stringify(s.apiListaDaVez(14, 1761665405000)));
@@ -209,16 +217,28 @@ test('chamada chama só quem trabalha naquela hora (costume ou aba Horários), s
   hor.push(['DANIEL VARGAS', '08:00', '18:00']);
   s.apiResposta({ pessoa: 'DANIEL VARGAS', hora: 9, resposta: 'não veio' });
   c = JSON.parse(JSON.stringify(s.apiChamada(11)));
-  assert.deepStrictEqual(c.faltam, ['JULIA GOMES']);
+  // Julia sai 12:00: a chamada das 12:30 (faixa 11:30 – 12:30) não chama quem já foi embora.
+  assert.deepStrictEqual(c.faltam, []);
   assert.deepStrictEqual(c.naoVieram, ['DANIEL VARGAS']);
+  hor.find((r) => r[0] === 'julia gomes')[2] = '12:35';
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(11))).faltam, ['JULIA GOMES'], 'até 10 minutos depois da saída ainda chama');
+  // 16:45 cobra 16:30 – 17:30: quem sai 16:45 é chamado; quem sai 14:45 não é chamado às 15:30.
+  hor.find((r) => r[0] === 'julia gomes')[1] = '07:00';
+  hor.find((r) => r[0] === 'julia gomes')[2] = '16:45';
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(16))).faltam, ['JULIA GOMES']);
+  hor.find((r) => r[0] === 'julia gomes')[2] = '14:45';
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(14))).faltam, []);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiChamada(13))).faltam, ['JULIA GOMES']);
+  hor.find((r) => r[0] === 'julia gomes')[1] = '10:00';
+  hor.find((r) => r[0] === 'julia gomes')[2] = '12:00';
   assert.throws(() => s.apiResposta({ pessoa: 'FULANO', hora: 10, resposta: 'nada' }), /Configurações/);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiResposta({ pessoa: 'JULIA GOMES', hora: 11, resposta: 'não respondeu' }))), { ok: true });
   const r2 = s.apiResposta({ pessoa: 'JULIA GOMES', hora: 12, resposta: 'não respondeu' });
-  assert.strictEqual(r2.falta, true, 'duas horas sem responder = falta');
-  c = JSON.parse(JSON.stringify(s.apiChamada(11)));
-  assert.deepStrictEqual(c.faltam, []);
-  assert.deepStrictEqual(c.faltas, ['JULIA GOMES']);
-  assert.strictEqual(s.apiResposta({ pessoa: 'JULIA GOMES', hora: 13, resposta: 'não respondeu' }).falta, undefined, 'falta só uma vez');
+  assert.strictEqual(r2.falta, undefined, 'falta nunca é marcada sozinha');
+  c = JSON.parse(JSON.stringify(s.apiChamada(9)));
+  assert.deepStrictEqual(c.faltam, ['JULIA GOMES'], 'continua sendo chamada');
+  assert.deepStrictEqual(c.faltas, []);
+  assert.ok(!p.getSheetByName('Chamada').dados.some((r) => r[4] === 'falta'));
   assert.strictEqual(s.apiChamador('Aparelho A', 10), true);
   assert.strictEqual(s.apiChamador('Aparelho B', 10), false, 'só um aparelho fala por hora');
   assert.strictEqual(s.apiChamador('Aparelho A', 10), true);
