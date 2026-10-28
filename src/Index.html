@@ -146,6 +146,7 @@
   <div id="chamadaVez"></div>
   <div id="chamadaLista"></div>
   <label class="chave"><span>Chamar sozinho aos 50 minutos de cada hora</span><input type="checkbox" id="chamarSozinho"></label>
+  <div class="chave"><select id="voz" class="trocar" style="margin:0;flex:1;min-width:0"></select><button id="ouvirVoz" class="pilula" style="flex-shrink:0">Ouvir</button></div>
   <div class="chave"><select id="testeNome" class="trocar" style="margin:0;flex:1;min-width:0"></select><button id="testar" class="pilula" style="flex-shrink:0">Testar</button></div>
   <div class="dica">Deixe o app aberto neste aparelho, com o som ligado. Cada resposta fica na aba Chamada da planilha. Ele fala, um de cada vez, o nome de quem está no horário e ainda não lançou a hora. O horário vem da aba Horários; quem não está lá, pelo costume das últimas 2 semanas.</div>
 </div>
@@ -517,10 +518,32 @@
     if (chamada.rodando) proximaVez(PAUSA);
   }
 
+  // Voz escolhida neste aparelho (cada aparelho tem as suas; as "Natural"/"Online" do Edge são as mais humanas).
+  function vozes() {
+    try {
+      var todas = window.speechSynthesis.getVoices() || [];
+      var pt = todas.filter(function (v) { return /^pt/i.test(v.lang); });
+      return pt.length ? pt : todas;
+    } catch (e) { return []; }
+  }
+  function preencherVozes() {
+    var sel = $('voz'), lista = vozes(), atual = guardar.ler('voz');
+    if (!lista.length) return;
+    sel.innerHTML = '';
+    sel.appendChild(el('option', '', 'Voz padrão do aparelho')).value = '';
+    lista.forEach(function (v) { var o = el('option', '', v.name.replace(/^Microsoft\s+/, '').replace(/\s+-\s+.*$/, '') + (/^pt-PT/i.test(v.lang) ? ' (Portugal)' : '')); o.value = v.name; if (v.name === atual) o.selected = true; sel.appendChild(o); });
+  }
+  try { window.speechSynthesis.onvoiceschanged = preencherVozes; } catch (e) {}
+  $('voz').onchange = function () { guardar.por('voz', this.value); falar('Esta é a voz da chamada.'); };
+  $('ouvirVoz').onclick = function () { falar('Esta é a voz da chamada.'); };
+
   function falar(texto) {
     try {
       var u = new SpeechSynthesisUtterance(texto);
       u.lang = 'pt-BR'; u.rate = 0.95;
+      var nome = guardar.ler('voz');
+      var v = nome && vozes().filter(function (x) { return x.name === nome; })[0];
+      if (v) { u.voice = v; u.lang = v.lang; }
       window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
     } catch (e) {}
   }
@@ -627,6 +650,7 @@
   function abrirChamada(auto, forcar) {
     if (forcar || !$('tLancar').classList.contains('ativa') || !$('fala').value.trim()) tela('tChamada');
     if (auto) chamada.auto = true;
+    preencherVozes();
     var sel = $('testeNome');
     if (!sel.options.length && estado.dados) {
       sel.appendChild(el('option', '', 'Testar com…')).value = '';
