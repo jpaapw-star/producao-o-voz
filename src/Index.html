@@ -491,22 +491,30 @@
   $('voltarHoje').onclick = function () { tela('tLancar'); };
 
   /* ---------- chamada ---------- */
-  var chamada = { fila: [], feitos: [], nada: [], naoVieram: [], hora: null, faixa: '', auto: false, voltar: null, rodada: 0, timer: null, semResposta: {} };
+  // Regras da chamada: um nome por vez. Respondeu, o próximo vem em 5 segundos. Sem resposta em 2 minutos,
+  // o nome vai para o fim da fila e é chamado mais uma vez. Duas horas do dia sem responder = falta no dia (planilha).
+  var ESPERA = 120000, PAUSA = 5000;
+  var chamada = { fila: [], vezes: {}, semResposta: [], faltas: [], feitos: [], nada: [], naoVieram: [], hora: null, faixa: '',
+    auto: false, rodando: false, voltar: null, timer: null, teste: null };
   var bonito = function (n) { return String(n).toLowerCase().replace(/(^|\s)(\S)/g, function (m, a, c) { return a + c.toUpperCase(); }); };
   function hojeTexto() { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
 
   // Cada resposta vai para a aba Chamada da planilha.
   function responder(nome, resposta) {
     if (nome === chamada.teste) { chamada.teste = null; avisar('Teste: resposta "' + resposta + '" (não foi para a planilha).'); return; }
-    chamar('apiResposta', { pessoa: nome, hora: chamada.hora, resposta: resposta }).catch(function (e) { avisar('Não guardou a resposta: ' + mensagem(e)); });
+    chamar('apiResposta', { pessoa: nome, hora: chamada.hora, resposta: resposta }).then(function (r) {
+      if (r && r.falta) { avisar(bonito(nome) + ' ficou com falta hoje: 2 horas sem responder a chamada.', '', null, 15000); chamada.faltas.push(nome); desenharChamada(); }
+    }).catch(function (e) { avisar('Não guardou a resposta: ' + mensagem(e)); });
   }
-  function tirarDaFila(nome, resposta, lista) {
+
+  function respondeu(nome, resposta, lista) {
     clearTimeout(chamada.timer);
+    var eraTeste = nome === chamada.teste;
     responder(nome, resposta);
     chamada.fila = chamada.fila.filter(function (n) { return n !== nome; });
-    lista.push(nome);
+    if (!eraTeste) lista.push(nome);
     desenharChamada();
-    if (chamada.fila.length) chamarVez(); else falar('Chamada terminada.');
+    if (chamada.rodando) proximaVez(PAUSA);
   }
 
   function falar(texto) {
@@ -517,91 +525,152 @@
     } catch (e) {}
   }
 
+  // Todos os aparelhos com a chamada ligada falam juntos: quem comanda publica a frase com a hora de falar
+  // (relógio do servidor); os outros consultam e falam no mesmo instante.
+  var anuncio = { ultimo: null, ajuste: 0, quando: 0 };
+  function acertarRelogio(agoraServidor, t0) { anuncio.ajuste = agoraServidor - (t0 + Date.now()) / 2; }
+  function falarNaHora(a) {
+    if (!a || a.id === anuncio.ultimo) return;
+    anuncio.ultimo = a.id; anuncio.quando = Date.now();
+    var falta = a.falarEm - (Date.now() + anuncio.ajuste);
+    if (falta < -4000) return;
+    setTimeout(function () { falar(a.texto); }, Math.max(0, falta));
+  }
+  function anunciar(texto) {
+    var t0 = Date.now();
+    chamar('apiAnunciar', aparelho, texto).then(function (r) {
+      acertarRelogio(r.agora, t0); falarNaHora(r.anuncio);
+    }).catch(function () { falar(texto); });
+  }
+  function ouvirAnuncio() {
+    if (!estado.dados || !ligada() || document.hidden || chamada.rodando) return;
+    var t0 = Date.now();
+    chamar('apiAnuncio').then(function (r) {
+      acertarRelogio(r.agora, t0);
+      var a = r.anuncio;
+      if (!a || a.de === aparelho || a.id === anuncio.ultimo) return;
+      falarNaHora(a);
+      if ($('tChamada').classList.contains('ativa')) conferirFila();
+    }).catch(function () {});
+  }
+  // Consulta rápida (2 s) perto dos 50 minutos ou logo depois de um anúncio; no resto da hora, a cada 30 s.
+  var ultimaConsulta = 0;
+  setInterval(function () {
+    var min = new Date().getMinutes(), perto = min >= 49 || Date.now() - anuncio.quando < 180000;
+    if (Date.now() - ultimaConsulta < (perto ? 2000 : 30000)) return;
+    ultimaConsulta = Date.now();
+    ouvirAnuncio();
+  }, 1000);
+
+  function guardarListas(r) {
+    chamada.feitos = r.feitos; chamada.nada = r.nada || []; chamada.naoVieram = r.naoVieram || []; chamada.faltas = r.faltas || [];
+  }
+
   // Antes de falar cada nome, confere na planilha quem já respondeu por outro aparelho (celular), para não chamar à toa.
   function conferirFila() {
     return chamar('apiChamada', chamada.hora).then(function (r) {
       var naFila = pessoasNaFila();
       var pendentes = r.faltam.filter(function (n) { return naFila.indexOf(n) < 0; });
       chamada.fila = chamada.fila.filter(function (n) { return n === chamada.teste || pendentes.indexOf(n) >= 0; });
-      chamada.feitos = r.feitos; chamada.nada = r.nada || []; chamada.naoVieram = r.naoVieram || [];
+      guardarListas(r);
       desenharChamada();
     }).catch(function () {});
   }
   setInterval(function () { if ($('tChamada').classList.contains('ativa') && chamada.fila.length) conferirFila(); }, 20000);
 
+  function proximaVez(ms) {
+    clearTimeout(chamada.timer);
+    if (!chamada.fila.length) {
+      if (chamada.rodando) { chamada.rodando = false; anunciar('Chamada terminada.'); }
+      return;
+    }
+    chamada.timer = setTimeout(chamarVez, ms);
+  }
+
   function chamarVez() {
     clearTimeout(chamada.timer);
-    if (!chamada.fila.length) return;
+    if (!chamada.fila.length) return proximaVez(0);
     conferirFila().then(falarVez);
   }
 
   function falarVez() {
     clearTimeout(chamada.timer);
-    if (!chamada.fila.length) { falar('Chamada terminada.'); return; }
-    var nome = chamada.fila[0].split(/\s+/).slice(0, 2).join(' ');
-    falar(bonito(nome) + ', falta a sua produção das ' + chamada.hora + ' horas.');
-    // Na chamada sozinha, quem não aparece em 45 segundos vai para o fim da fila; uma volta só.
-    if (chamada.teste && chamada.fila[0] === chamada.teste) {
-      var t = chamada.teste;
-      chamada.timer = setTimeout(function () {
-        if (chamada.teste !== t) return;
-        chamada.teste = null;
-        chamada.fila = chamada.fila.filter(function (n) { return n !== t; });
-        desenharChamada();
-        avisar('Teste: ' + bonito(t) + ' não respondeu em 45 segundos. Na chamada de verdade, iria para o fim da fila e ficaria "não respondeu" na aba Chamada.', 'Ok', function () { $('aviso').style.display = 'none'; }, 30000);
-      }, 45000);
-    } else if (chamada.auto) chamada.timer = setTimeout(function () { proximo(false); }, 45000);
+    if (!chamada.fila.length) return proximaVez(0);
+    var nome = chamada.fila[0];
+    chamada.vezes[nome] = (chamada.vezes[nome] || 0) + 1;
+    var curto = bonito(nome.split(/\s+/).slice(0, 2).join(' '));
+    var frase = curto + ', falta a sua produção das ' + chamada.hora + ' horas.' + (chamada.vezes[nome] > 1 ? ' Segunda chamada.' : '');
+    if (nome === chamada.teste) falar(frase); else anunciar(frase);
+    desenharChamada();
+    chamada.timer = setTimeout(semResposta, ESPERA);
   }
 
-  // Passa a vez: o nome vai para o fim da fila.
-  function proximo(falarAgora) {
+  // Ninguém tocou em nada: primeira vez vai para o fim da fila; segunda vez fica "não respondeu" nesta hora.
+  function semResposta() {
+    clearTimeout(chamada.timer);
     var nome = chamada.fila.shift();
-    if (nome) { chamada.fila.push(nome); chamada.rodada++; }
-    if (nome && !falarAgora && !chamada.semResposta[nome + chamada.hora]) { chamada.semResposta[nome + chamada.hora] = true; responder(nome, 'não respondeu'); }
-    if (chamada.auto && chamada.rodada >= chamada.fila.length) chamada.auto = false;
+    if (!nome) return proximaVez(0);
+    if (nome === chamada.teste) {
+      if (chamada.vezes[nome] < 2) { chamada.fila.unshift(nome); avisar('Teste: 2 minutos sem resposta. Chamando a segunda vez.'); falarVez(); return; }
+      chamada.teste = null; desenharChamada();
+      avisar('Teste: 2 chamadas sem resposta. De verdade, ficaria "não respondeu" nesta hora; com 2 horas assim no dia, falta.', 'Ok', function () { $('aviso').style.display = 'none'; }, 30000);
+      if (chamada.rodando) proximaVez(PAUSA);
+      return;
+    }
+    if (chamada.vezes[nome] < 2) chamada.fila.push(nome);
+    else { chamada.semResposta.push(nome); responder(nome, 'não respondeu'); }
     desenharChamada();
-    if (chamada.auto || falarAgora) chamarVez();
+    proximaVez(1000);
   }
 
   // Na chamada sozinha, quem está no meio de um lançamento não é interrompido: só aparece um aviso.
   function abrirChamada(auto, forcar) {
     if (forcar || !$('tLancar').classList.contains('ativa') || !$('fala').value.trim()) tela('tChamada');
-    chamada.auto = !!auto; chamada.rodada = 0;
+    if (auto) chamada.auto = true;
     var sel = $('testeNome');
     if (!sel.options.length && estado.dados) {
       sel.appendChild(el('option', '', 'Testar com…')).value = '';
       estado.dados.pessoas.forEach(function (p) { var o = el('option', '', bonito(p)); o.value = p; sel.appendChild(o); });
     }
-    chamada.hora = horaAgora();
+    var hora = horaAgora();
+    if (hora !== chamada.hora) { chamada.hora = hora; chamada.vezes = {}; chamada.semResposta = []; }
     $('chamadaFaixa').textContent = 'Procurando quem falta…';
-    $('chamadaVez').innerHTML = ''; $('chamadaLista').innerHTML = '';
     return chamar('apiChamada', chamada.hora).then(function (r) {
       chamada.faixa = r.faixa;
       var naFila = pessoasNaFila();
-      chamada.fila = r.faltam.filter(function (n) { return naFila.indexOf(n) < 0; });
-      chamada.feitos = r.feitos; chamada.nada = r.nada || []; chamada.naoVieram = r.naoVieram || [];
+      // Quem já foi chamado uma vez nesta hora continua no fim da fila.
+      chamada.fila = r.faltam.filter(function (n) { return naFila.indexOf(n) < 0 && chamada.semResposta.indexOf(n) < 0; })
+        .sort(function (x, y) { return (chamada.vezes[x] || 0) - (chamada.vezes[y] || 0); });
+      guardarListas(r);
       if (!$('tChamada').classList.contains('ativa')) {
         if (chamada.fila.length) avisar('Chamada: faltam ' + chamada.fila.length + ' na faixa ' + r.faixa + '.', 'Abrir', function () { abrirChamada(true, true); }, 60000);
         return;
       }
-      desenharChamada();
-      if (chamada.fila.length && (auto || forcar || chamada.voltarFalando)) chamarVez();
-      chamada.voltarFalando = false;
+      // Só fala o aparelho com "Chamar sozinho" ligado, e só um por hora (o primeiro que pede). Os outros ficam em silêncio.
+      var pedir = ligada() ? chamar('apiChamador', aparelho, chamada.hora) : Promise.resolve(false);
+      return pedir.then(function (ok) {
+        chamada.mudo = !ok;
+        desenharChamada();
+        if (ok && chamada.fila.length && (auto || forcar || chamada.voltarFalando)) { chamada.rodando = true; proximaVez(chamada.voltarFalando ? PAUSA : 0); }
+        chamada.voltarFalando = false;
+      });
     }).catch(function (e) { $('chamadaFaixa').textContent = mensagem(e); });
   }
 
   function desenharChamada() {
     var faltam = chamada.fila.length;
     $('chamadaFaixa').textContent = 'Faixa ' + chamada.faixa + ' · ' +
-      (faltam ? (faltam === 1 ? 'falta 1' : 'faltam ' + faltam) : (chamada.feitos.length + chamada.nada.length + chamada.naoVieram.length ? 'todo mundo respondeu' : 'ninguém no horário')) +
+      (faltam ? (faltam === 1 ? 'falta 1' : 'faltam ' + faltam) : (chamada.feitos.length + chamada.nada.length + chamada.naoVieram.length + chamada.semResposta.length ? 'chamada terminada' : 'ninguém no horário')) +
       (chamada.feitos.length ? ' · ' + chamada.feitos.length + (chamada.feitos.length === 1 ? ' já lançou' : ' já lançaram') : '') +
-      (chamada.nada.length ? ' · ' + chamada.nada.length + ' sem produção' : '');
+      (chamada.nada.length ? ' · ' + chamada.nada.length + ' sem produção' : '') +
+      (chamada.mudo ? ' · em silêncio neste aparelho (toque no seu nome para responder)' : '');
     var vez = $('chamadaVez'); vez.innerHTML = '';
     if (faltam) {
       var nome = chamada.fila[0];
       var c = el('div', 'cartao vez');
       c.appendChild(el('div', 'grande', bonito(nome)));
-      c.appendChild(el('div', 'item', nome === chamada.teste ? 'Teste: as respostas não vão para a aba Chamada' : 'Falta a produção das ' + chamada.faixa));
+      c.appendChild(el('div', 'item', (nome === chamada.teste ? 'Teste: as respostas não vão para a aba Chamada' : 'Falta a produção das ' + chamada.faixa) +
+        (chamada.vezes[nome] > 1 ? ' · segunda chamada' : '')));
       var a = el('div', 'acoes');
       var b1 = el('button', 'principal', 'Lançar agora');
       b1.onclick = function () {
@@ -612,30 +681,36 @@
         abrirLancar(); $('fala').focus();
       };
       var b2 = el('button', '', 'Nada nesta hora');
-      b2.onclick = function () { tirarDaFila(nome, 'nada', chamada.nada); };
+      b2.onclick = function () { respondeu(nome, 'nada', chamada.nada); };
       var b3 = el('button', '', 'Depois');
-      b3.onclick = function () { proximo(true); };
+      b3.onclick = semResposta;
       var b4 = el('button', '', 'Não veio hoje');
-      b4.onclick = function () { tirarDaFila(nome, 'não veio', chamada.naoVieram); };
+      b4.onclick = function () { respondeu(nome, 'não veio', chamada.naoVieram); };
       a.appendChild(b1); a.appendChild(b2); a.appendChild(b3); a.appendChild(b4);
       c.appendChild(a);
       var rep = el('button', 'link', 'Chamar de novo');
-      rep.onclick = chamarVez;
+      rep.onclick = function () { chamada.vezes[nome] = Math.max(0, (chamada.vezes[nome] || 1) - 1); falarVez(); };
       c.appendChild(rep);
       vez.appendChild(c);
     } else {
       vez.appendChild(el('div', 'cartao vez', ''));
-      var ninguem = !chamada.feitos.length && !chamada.nada.length && !chamada.naoVieram.length;
+      var ninguem = !chamada.feitos.length && !chamada.nada.length && !chamada.naoVieram.length && !chamada.semResposta.length;
       vez.firstChild.appendChild(el('div', 'grande', ninguem ? 'Ninguém no horário' : 'Pronto'));
-      vez.firstChild.appendChild(el('div', 'item', ninguem ? 'Ninguém trabalha na faixa ' + chamada.faixa + ' pelo horário. Para ouvir a chamada, use Testar.' : 'Todo mundo lançou a faixa ' + chamada.faixa + '.'));
+      vez.firstChild.appendChild(el('div', 'item', ninguem ? 'Ninguém trabalha na faixa ' + chamada.faixa + ' pelo horário. Para ouvir a chamada, use Testar.'
+        : chamada.semResposta.length ? 'Chamada da faixa ' + chamada.faixa + ' terminada. ' + chamada.semResposta.length + ' não respondeu.' : 'Todo mundo respondeu a faixa ' + chamada.faixa + '.'));
     }
     var lista = $('chamadaLista'); lista.innerHTML = '';
     var l = el('div', 'lista');
-    [[chamada.fila.slice(1), 'falta'], [chamada.feitos, 'lançou'], [chamada.nada, 'nada nesta hora'], [chamada.naoVieram, 'não veio']].forEach(function (g) {
+    [[chamada.fila.slice(1), 'falta'], [chamada.semResposta, 'não respondeu'], [chamada.feitos, 'lançou'], [chamada.nada, 'nada nesta hora'],
+      [chamada.naoVieram, 'não veio'], [chamada.faltas, 'falta no dia']].forEach(function (g) {
       g[0].forEach(function (n) {
         var d = el('div', 'linha'); d.appendChild(el('span', '', bonito(n))); d.appendChild(el('span', '', g[1]));
         // Tocar num nome que falta traz a pessoa para a vez (ex.: no celular, a pessoa responde por ela mesma).
-        if (g[1] === 'falta') { d.style.cursor = 'pointer'; d.onclick = function () { clearTimeout(chamada.timer); chamada.fila = [n].concat(chamada.fila.filter(function (x) { return x !== n; })); desenharChamada(); window.scrollTo(0, 0); }; }
+        if (g[1] === 'falta' || g[1] === 'não respondeu') { d.style.cursor = 'pointer'; d.onclick = function () {
+          clearTimeout(chamada.timer);
+          chamada.semResposta = chamada.semResposta.filter(function (x) { return x !== n; });
+          chamada.fila = [n].concat(chamada.fila.filter(function (x) { return x !== n; })); desenharChamada(); window.scrollTo(0, 0);
+        }; }
         l.appendChild(d);
       });
     });
@@ -647,28 +722,32 @@
   $('testar').onclick = function () {
     var n = $('testeNome').value;
     if (!n) return;
-    chamada.teste = n;
-    if (!chamada.faixa) chamada.faixa = '';
+    chamada.teste = n; chamada.vezes[n] = 0;
+    if (chamada.hora === null) chamada.hora = horaAgora();
     chamada.fila = [n].concat(chamada.fila.filter(function (x) { return x !== n; }));
     desenharChamada(); window.scrollTo(0, 0);
     falarVez();
   };
-  $('voltarChamada').onclick = function () { clearTimeout(chamada.timer); chamada.auto = false; abrirLancar(); };
+  $('voltarChamada').onclick = function () { clearTimeout(chamada.timer); chamada.auto = false; chamada.rodando = false; abrirLancar(); };
 
   // Chamada sozinha: uma vez por hora, a partir dos 50 minutos, com o app aberto.
+  // Vem ligada ao abrir o app; só desliga se alguém desmarcar neste aparelho.
+  function ligada() { return guardar.ler('chamarSozinho') !== '0'; }
   var travaTela = null;
   function manterTelaAcesa() {
-    try { if (guardar.ler('chamarSozinho') === '1' && navigator.wakeLock && !document.hidden) navigator.wakeLock.request('screen').then(function (t) { travaTela = t; }); } catch (e) {}
+    // Tela acesa só no computador; no celular gastaria bateria.
+    try { if (ligada() && !/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) && navigator.wakeLock && !document.hidden) navigator.wakeLock.request('screen').then(function (t) { travaTela = t; }); } catch (e) {}
   }
-  $('chamarSozinho').checked = guardar.ler('chamarSozinho') === '1';
+  $('chamarSozinho').checked = ligada();
   $('chamarSozinho').onchange = function () {
-    guardar.por('chamarSozinho', this.checked ? '1' : '');
+    guardar.por('chamarSozinho', this.checked ? '1' : '0');
     if (this.checked) { falar('Chamada ligada.'); manterTelaAcesa(); } else if (travaTela) { try { travaTela.release(); } catch (e) {} }
   };
   document.addEventListener('visibilitychange', manterTelaAcesa);
   manterTelaAcesa();
   setInterval(function () {
-    if (!estado.dados || guardar.ler('chamarSozinho') !== '1' || new Date().getMinutes() < 50) return;
+    // Tela apagada (celular no bolso) não chama: fica para o aparelho que está à vista.
+    if (!estado.dados || !ligada() || document.hidden || new Date().getMinutes() < 50) return;
     var vez = hojeTexto() + ' ' + horaAgora();
     if (guardar.ler('ultimaChamada') === vez) return;
     guardar.por('ultimaChamada', vez);

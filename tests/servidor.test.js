@@ -201,5 +201,26 @@ test('chamada chama só quem trabalha naquela hora (costume ou aba Horários), s
   assert.deepStrictEqual(c.faltam, ['JULIA GOMES']);
   assert.deepStrictEqual(c.naoVieram, ['DANIEL VARGAS']);
   assert.throws(() => s.apiResposta({ pessoa: 'FULANO', hora: 10, resposta: 'nada' }), /Configurações/);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiResposta({ pessoa: 'JULIA GOMES', hora: 11, resposta: 'não respondeu' }))), { ok: true });
+  const r2 = s.apiResposta({ pessoa: 'JULIA GOMES', hora: 12, resposta: 'não respondeu' });
+  assert.strictEqual(r2.falta, true, 'duas horas sem responder = falta');
+  c = JSON.parse(JSON.stringify(s.apiChamada(11)));
+  assert.deepStrictEqual(c.faltam, []);
+  assert.deepStrictEqual(c.faltas, ['JULIA GOMES']);
+  assert.strictEqual(s.apiResposta({ pessoa: 'JULIA GOMES', hora: 13, resposta: 'não respondeu' }).falta, undefined, 'falta só uma vez');
+  assert.strictEqual(s.apiChamador('Aparelho A', 10), true);
+  assert.strictEqual(s.apiChamador('Aparelho B', 10), false, 'só um aparelho fala por hora');
+  assert.strictEqual(s.apiChamador('Aparelho A', 10), true);
+  assert.strictEqual(s.apiChamador('Aparelho B', 11), true);
   assert.throws(() => s.apiResposta({ pessoa: 'JULIA GOMES', hora: 10, resposta: 'x' }), /inválida/);
+});
+
+test('anúncio da chamada vale para todos os aparelhos', () => {
+  const s = carregarServidor(planilha());
+  assert.strictEqual(s.apiAnuncio().anuncio, null);
+  const r = s.apiAnunciar('Aparelho A', 'Julia Gomes, falta a sua produção das 9 horas.');
+  const lido = s.apiAnuncio();
+  assert.strictEqual(lido.anuncio.texto, 'Julia Gomes, falta a sua produção das 9 horas.');
+  assert.strictEqual(lido.anuncio.id, r.anuncio.id);
+  assert.ok(lido.anuncio.falarEm > r.agora);
 });

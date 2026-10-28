@@ -10,7 +10,7 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.7.2';
+var VERSAO = '1.8.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
@@ -527,7 +527,7 @@ function apiChamada(hora) {
     });
   }
   // Respostas de hoje na aba Chamada: "nada" vale para a faixa; "não veio" vale para o dia todo.
-  var nada = {}, foraHoje = {};
+  var nada = {}, foraHoje = {}, faltou = {};
   var cham = ss.getSheetByName(CHAMADA_ABA);
   if (cham && cham.getLastRow() > 1) {
     var hojeIso = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
@@ -536,6 +536,7 @@ function apiChamada(hora) {
       if (dataTexto_(r[1], tz) !== hojeIso) return;
       var p = semAcento_(r[3]);
       if (r[4] === 'não veio') foraHoje[p] = true;
+      if (r[4] === 'falta') { foraHoje[p] = true; faltou[p] = true; }
       if (r[4] === 'nada' && String(r[2]).indexOf(f.inicio) === 0) nada[p] = true;
     });
   }
@@ -545,7 +546,8 @@ function apiChamada(hora) {
     faltam: lista(function (p) { return !feitos[p] && !nada[p] && !foraHoje[p]; }),
     feitos: lista(function (p) { return feitos[p]; }),
     nada: lista(function (p) { return !feitos[p] && nada[p]; }),
-    naoVieram: lista(function (p) { return !feitos[p] && !nada[p] && foraHoje[p]; })
+    naoVieram: lista(function (p) { return !feitos[p] && !nada[p] && foraHoje[p] && !faltou[p]; }),
+    faltas: lista(function (p) { return !feitos[p] && !nada[p] && faltou[p]; })
   };
 }
 
@@ -568,9 +570,53 @@ function apiResposta(pedido) {
     aba.setFrozenRows(1);
   }
   var agora = new Date();
-  aba.appendRow([Utilities.formatDate(agora, tz, 'HH:mm'), Utilities.formatDate(agora, tz, 'dd/MM/yyyy'),
-    f.inicio + ' – ' + f.fim, pessoa, pedido.resposta]);
-  return true;
+  var dia = Utilities.formatDate(agora, tz, 'dd/MM/yyyy');
+  aba.appendRow([Utilities.formatDate(agora, tz, 'HH:mm'), dia, f.inicio + ' – ' + f.fim, pessoa, pedido.resposta]);
+  if (pedido.resposta !== 'não respondeu') return { ok: true };
+  // Duas horas do dia sem responder: falta no dia (a chamada não chama mais essa pessoa hoje).
+  var hoje = dataTexto_(dia, tz), alvo = semAcento_(pessoa), faixas = {}, jaTem = false;
+  var n = aba.getLastRow(), ini = Math.max(2, n - 500);
+  aba.getRange(ini, 1, n - ini + 1, CHAMADA_CABECALHO.length).getDisplayValues().forEach(function (r) {
+    if (dataTexto_(r[1], tz) !== hoje || semAcento_(r[3]) !== alvo) return;
+    if (r[4] === 'não respondeu') faixas[r[2]] = true;
+    if (r[4] === 'falta') jaTem = true;
+  });
+  if (jaTem || Object.keys(faixas).length < 2) return { ok: true };
+  aba.appendRow([Utilities.formatDate(agora, tz, 'HH:mm'), dia, f.inicio + ' – ' + f.fim, pessoa, 'falta']);
+  return { ok: true, falta: true };
+}
+
+// Fala sincronizada: o aparelho que comanda a chamada publica o texto com a hora certa de falar (relógio do servidor);
+// os outros aparelhos leem e falam no mesmo instante.
+function apiAnunciar(aparelho, texto) {
+  var agora = Date.now();
+  var anuncio = { id: aparelho + '-' + agora, de: String(aparelho), texto: String(texto).slice(0, 300), falarEm: agora + 3000 };
+  CacheService.getScriptCache().put('anuncio', JSON.stringify(anuncio), 600);
+  return { agora: Date.now(), anuncio: anuncio };
+}
+
+function apiAnuncio() {
+  var bruto = CacheService.getScriptCache().get('anuncio');
+  return { agora: Date.now(), anuncio: bruto ? JSON.parse(bruto) : null };
+}
+
+// Vários aparelhos com a chamada ligada: só o primeiro que pede a hora fala; os outros ficam em silêncio.
+function apiChamador(aparelho, hora) {
+  var cfg = config_();
+  var ss = abrir_(cfg);
+  var tz = ss.getSpreadsheetTimeZone();
+  var chave = 'chamador-' + Utilities.formatDate(new Date(), tz, 'yyyyMMdd') + '-' + Math.floor(Number(hora));
+  var trava = LockService.getScriptLock();
+  trava.waitLock(10000);
+  try {
+    var cache = CacheService.getScriptCache();
+    var atual = cache.get(chave);
+    if (atual && atual !== String(aparelho)) return false;
+    cache.put(chave, String(aparelho), 3600);
+    return true;
+  } finally {
+    trava.releaseLock();
+  }
 }
 
 function apiHoje(quem) {
