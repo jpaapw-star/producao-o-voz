@@ -150,6 +150,7 @@
   <label class="chave"><span>Chamar sozinho nos horários da chamada</span><input type="checkbox" id="chamarSozinho"></label>
   <label class="chave"><span>Ouvir as respostas pelo microfone</span><input type="checkbox" id="ouvir"></label>
   <p id="ouvindo" class="sub"></p>
+  <div id="anotacao" class="cartao" style="display:none"></div>
   <div class="cartao">
     <div style="font-weight:600">Horários da chamada</div>
     <div id="agendaInfo" class="item"></div>
@@ -609,6 +610,7 @@
   function ouvirRespostas(ate, aoOuvir) {
     pararDeOuvir();
     var tratar = aoOuvir || entendeuResposta;
+    var parcial = tratar === ouviuNaConversa ? anotarParcial : null;
     if (!Reconhecer || (!conversa.teste && (!ouvirLigado() || !chamada.rodando)) || agoraCerto() >= ate) return;
     ouvirAte = ate;
     try {
@@ -620,7 +622,7 @@
           if (ehEco(dito)) continue;
           // A pessoa falou por cima: o computador se cala e escuta.
           if (falandoAgora) { falandoAgora = ''; try { window.speechSynthesis.cancel(); } catch (x) {} }
-          if (e.results[i].isFinal) tratar(dito);
+          if (e.results[i].isFinal) tratar(dito); else if (parcial) parcial(dito);
         }
       };
       r.onerror = function (e) {
@@ -663,11 +665,24 @@
   // esse computador pega a vez (o servidor deixa só um), pergunta o que ela fez, repete e grava depois do "sim".
   // Os outros ficam quietos e, quando a vez acaba, todos chamam a próxima (estado no servidor, conferido a cada 2 s).
   // Com "teste" ligado (botão Conversar), é só este computador conversando: não pega a vez no servidor nem grava.
-  var conversa = { ativa: false, teste: false, vez: null, etapa: '', linhas: null, textos: [], tentativas: 0, ia: false, historico: [] };
+  var conversa = { ativa: false, teste: false, proposta: null, vez: null, etapa: '', linhas: null, textos: [], tentativas: 0, ia: false, historico: [] };
   function semAcentoMin(t) { return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim(); }
   function juntarNomes(n) { return n.length > 1 ? n.slice(0, -1).join(', ') + ' e ' + n[n.length - 1] : (n[0] || ''); }
   function primeiroNome(p) { return bonito(String(p).split(/\s+/)[0]); }
   function mostrarConversa(t) { $('ouvindo').textContent = t || ''; }
+  // Enquanto a pessoa fala, a tela vai anotando só o que importa (produto e quantidades).
+  function mostrarAnotacao(linhas) {
+    var a = $('anotacao');
+    if (!linhas || !linhas.length) { a.style.display = 'none'; a.textContent = ''; return; }
+    a.textContent = 'Anotando: ' + linhas.map(resumoSemNome).join('; ');
+    a.style.display = '';
+  }
+  function anotarParcial(texto) {
+    var e = conversa.vez;
+    if (!e || !e.pessoa || conversa.etapa === 'esperando' || conversa.etapa === 'chamando') return;
+    var linhas = linhasDaPessoa(conversa.textos.slice(1).concat([texto]).join(' '), e.pessoa);
+    if (linhas.length) mostrarAnotacao(linhas);
+  }
 
   function comecarChamada(alvo) {
     chamar('apiComecarVez', chamada.hora, alvo).then(function (e) {
@@ -756,7 +771,7 @@
     var e = conversa.vez;
     pararDeOuvir();
     conversa.etapa = 'gravando';
-    mostrarConversa('');
+    mostrarConversa(''); mostrarAnotacao(null); conversa.proposta = null;
     if (conversa.teste) {
       return falar(frase, function () {
         conversa.etapa = ''; conversa.teste = false; conversa.vez = null;
@@ -807,6 +822,9 @@
       if (r.acao === 'gravar' && linhas.length) { conversa.linhas = linhas; return gravarConversa(); }
       if (r.acao === 'nada') { conversa.linhas = 'nada'; return gravarConversa(); }
       if (r.acao === 'desistir') return encerrarConversa(r.fala + ' Vou chamar a próxima pessoa.');
+      // Resumo para confirmar: um "sim" depois já grava, sem esperar a IA de novo.
+      conversa.proposta = r.acao === 'confirmar' && linhas.length ? linhas : null;
+      if (linhas.length) mostrarAnotacao(linhas);
       // Conversa paralela da sala, não era para a IA: não responde e continua ouvindo.
       if (r.acao === 'ignorar') { conversa.historico.pop(); conversa.historico.pop(); conversa.etapa = 'ia'; mostrarConversa('Ouvindo ' + primeiroNome(e.pessoa) + '…'); return ouvirRespostas(agoraCerto() + 40000, ouviuNaConversa); }
       dizerEOuvir(r.fala, 'ia');
@@ -846,7 +864,17 @@
       return;
     }
     conversa.textos.push(texto);
-    if (conversa.etapa === 'ia') { conversa.historico.push({ quem: 'pessoa', texto: texto }); return perguntarIA(); }
+    anotarParcial('');
+    if (conversa.etapa === 'ia') {
+      var proposta = conversa.proposta; conversa.proposta = null;
+      if (proposta && /\b(sim|isso|certo|correto|exato|pode|confirmo|confirma|manda|beleza|ok)\b/.test(t)
+          && !/\b(nao|errado|errei|espera|mas|corrig|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\b|\d/.test(t)) {
+        conversa.linhas = proposta;
+        return gravarConversa();
+      }
+      conversa.historico.push({ quem: 'pessoa', texto: texto });
+      return perguntarIA();
+    }
     // Sem a IA: frase sem número nem resposta conhecida é conversa paralela da sala, ignora e continua ouvindo.
     var temNumero = /\d|\b(um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|quinze|vinte|trinta)\b/.test(t);
     var resposta = /\b(sim|isso|certo|correto|exato|pode|confirmo|confirma|manda|beleza|ok|nao|errado|errei|espera|corrig|nada|nenhum|nenhuma|esqueci|lembro|sei)/.test(t);
