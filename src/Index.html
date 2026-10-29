@@ -150,6 +150,7 @@
   <label class="chave"><span>Chamar sozinho nos horários da chamada</span><input type="checkbox" id="chamarSozinho"></label>
   <label class="chave"><span>Ouvir as respostas pelo microfone</span><input type="checkbox" id="ouvir"></label>
   <p id="ouvindo" class="sub"></p>
+  <div id="anotacao" class="cartao" style="display:none"></div>
   <div class="cartao">
     <div style="font-weight:600">Horários da chamada</div>
     <div id="agendaInfo" class="item"></div>
@@ -609,13 +610,20 @@
   function ouvirRespostas(ate, aoOuvir) {
     pararDeOuvir();
     var tratar = aoOuvir || entendeuResposta;
+    var parcial = tratar === ouviuNaConversa ? anotarParcial : null;
     if (!Reconhecer || (!conversa.teste && (!ouvirLigado() || !chamada.rodando)) || agoraCerto() >= ate) return;
     ouvirAte = ate;
     try {
       var r = new Reconhecer();
-      r.lang = 'pt-BR'; r.continuous = true; r.interimResults = false;
+      r.lang = 'pt-BR'; r.continuous = true; r.interimResults = true;
       r.onresult = function (e) {
-        for (var i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) tratar(e.results[i][0].transcript);
+        for (var i = e.resultIndex; i < e.results.length; i++) {
+          var dito = e.results[i][0].transcript;
+          if (ehEco(dito)) continue;
+          // A pessoa falou por cima: o computador se cala e escuta.
+          if (falandoAgora) { falandoAgora = ''; try { window.speechSynthesis.cancel(); } catch (x) {} }
+          if (e.results[i].isFinal) tratar(dito); else if (parcial) parcial(dito);
+        }
       };
       r.onerror = function (e) {
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture') {
@@ -628,6 +636,16 @@
       ouvindo = r; r.start();
       $('ouvindo').textContent = 'Ouvindo as respostas…';
     } catch (e) { ouvindo = null; }
+  }
+  // O microfone também pega a voz do próprio computador: o que só repete a frase que ele está falando
+  // (ou acabou de falar) é eco, não resposta.
+  var falandoAgora = '', ultimaFala = '', ultimaFalaAte = 0;
+  function ehEco(t) {
+    var frase = falandoAgora || (Date.now() < ultimaFalaAte ? ultimaFala : '');
+    if (!frase) return false;
+    var f = ' ' + semAcentoMin(frase) + ' ';
+    var w = semAcentoMin(t).split(' ').filter(Boolean);
+    return !w.length || w.every(function (x) { return f.indexOf(' ' + x + ' ') >= 0; });
   }
   function pararDeOuvir() {
     var r = ouvindo; ouvindo = null;
@@ -647,11 +665,24 @@
   // esse computador pega a vez (o servidor deixa só um), pergunta o que ela fez, repete e grava depois do "sim".
   // Os outros ficam quietos e, quando a vez acaba, todos chamam a próxima (estado no servidor, conferido a cada 2 s).
   // Com "teste" ligado (botão Conversar), é só este computador conversando: não pega a vez no servidor nem grava.
-  var conversa = { ativa: false, teste: false, vez: null, etapa: '', linhas: null, textos: [], tentativas: 0, ia: false, historico: [] };
+  var conversa = { ativa: false, teste: false, proposta: null, vez: null, etapa: '', linhas: null, textos: [], tentativas: 0, ia: false, historico: [] };
   function semAcentoMin(t) { return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim(); }
   function juntarNomes(n) { return n.length > 1 ? n.slice(0, -1).join(', ') + ' e ' + n[n.length - 1] : (n[0] || ''); }
   function primeiroNome(p) { return bonito(String(p).split(/\s+/)[0]); }
   function mostrarConversa(t) { $('ouvindo').textContent = t || ''; }
+  // Enquanto a pessoa fala, a tela vai anotando só o que importa (produto e quantidades).
+  function mostrarAnotacao(linhas) {
+    var a = $('anotacao');
+    if (!linhas || !linhas.length) { a.style.display = 'none'; a.textContent = ''; return; }
+    a.textContent = 'Anotando: ' + linhas.map(resumoSemNome).join('; ');
+    a.style.display = '';
+  }
+  function anotarParcial(texto) {
+    var e = conversa.vez;
+    if (!e || !e.pessoa || conversa.etapa === 'esperando' || conversa.etapa === 'chamando') return;
+    var linhas = linhasDaPessoa(conversa.textos.slice(1).concat([texto]).join(' '), e.pessoa);
+    if (linhas.length) mostrarAnotacao(linhas);
+  }
 
   function comecarChamada(alvo) {
     chamar('apiComecarVez', chamada.hora, alvo).then(function (e) {
@@ -693,11 +724,11 @@
   function chamarPessoa(e) {
     if (!conversa.vez || conversa.vez.falarEm !== e.falarEm) return;
     // A lista de quem falta só é falada quando a fila chega no fim e volta ao começo.
-    var lista = e.anunciar && e.fila.length > 1 ? 'Voltando ao começo da lista. Ainda falta a produção ' + faixaFalada() + ' de: ' + juntarNomes(e.fila.map(nomeCurto)) + '. ' : '';
+    var lista = e.anunciar && e.fila.length > 1 ? 'Voltando ao começo da lista. Ainda falta a produção de: ' + juntarNomes(e.fila.map(nomeCurto)) + '. ' : '';
     var outra = e.tentativas[e.pessoa] ? 'Chamando de novo. ' : '';
     chamada.vezes[e.pessoa] = (e.tentativas[e.pessoa] || 0) + 1;
     desenharChamada();
-    falar(lista + outra + nomeCurto(e.pessoa) + ', venha lançar a sua produção ' + faixaFalada() + '. Quando chegar no computador, diga: sou eu.', function () {
+    falar(lista + outra + nomeCurto(e.pessoa) + ', venha lançar a sua produção. Quando chegar no computador, diga: sou eu.', function () {
       if (!conversa.vez || conversa.vez.falarEm !== e.falarEm || conversa.vez.dono) return;
       conversa.etapa = 'esperando';
       mostrarConversa('Esperando ' + primeiroNome(e.pessoa) + ' dizer "sou eu"…');
@@ -716,13 +747,21 @@
   function resumoSemNome(l) { return resumoLinha(l).split(', ').slice(1).join(', '); }
 
   // Fala e depois ouve a resposta (40 s). Cada fala renova a vez no servidor, para os outros não chamarem por cima.
+  // Já ouve enquanto fala: se a pessoa falar por cima, o computador se cala (o eco da própria voz é ignorado).
   function dizerEOuvir(frase, etapa) {
     var e = conversa.vez;
     pararDeOuvir();
     conversa.etapa = etapa;
     if (!conversa.teste) chamar('apiPegarVez', chamada.hora, e.falarEm, aparelho).catch(function () {});
+    falandoAgora = frase;
+    ouvirRespostas(agoraCerto() + 40000 + frase.length * 90, ouviuNaConversa);
     mostrarConversa(etapa === 'confirmar' ? 'Esperando ' + primeiroNome(e.pessoa) + ' confirmar…' : 'Ouvindo ' + primeiroNome(e.pessoa) + '…');
-    falar(frase, function () { if (conversa.etapa === etapa) ouvirRespostas(agoraCerto() + 40000, ouviuNaConversa); });
+    falar(frase, function () {
+      if (falandoAgora === frase) { falandoAgora = ''; ultimaFala = frase; ultimaFalaAte = Date.now() + 1500; }
+      if (conversa.etapa !== etapa) return;
+      if (ouvindo) ouvirAte = Math.max(ouvirAte, agoraCerto() + 40000);
+      else ouvirRespostas(agoraCerto() + 40000, ouviuNaConversa);
+    });
   }
   function confirmar(linhas) {
     conversa.linhas = linhas;
@@ -732,7 +771,7 @@
     var e = conversa.vez;
     pararDeOuvir();
     conversa.etapa = 'gravando';
-    mostrarConversa('');
+    mostrarConversa(''); mostrarAnotacao(null); conversa.proposta = null;
     if (conversa.teste) {
       return falar(frase, function () {
         conversa.etapa = ''; conversa.teste = false; conversa.vez = null;
@@ -783,6 +822,9 @@
       if (r.acao === 'gravar' && linhas.length) { conversa.linhas = linhas; return gravarConversa(); }
       if (r.acao === 'nada') { conversa.linhas = 'nada'; return gravarConversa(); }
       if (r.acao === 'desistir') return encerrarConversa(r.fala + ' Vou chamar a próxima pessoa.');
+      // Resumo para confirmar: um "sim" depois já grava, sem esperar a IA de novo.
+      conversa.proposta = r.acao === 'confirmar' && linhas.length ? linhas : null;
+      if (linhas.length) mostrarAnotacao(linhas);
       // Conversa paralela da sala, não era para a IA: não responde e continua ouvindo.
       if (r.acao === 'ignorar') { conversa.historico.pop(); conversa.historico.pop(); conversa.etapa = 'ia'; mostrarConversa('Ouvindo ' + primeiroNome(e.pessoa) + '…'); return ouvirRespostas(agoraCerto() + 40000, ouviuNaConversa); }
       dizerEOuvir(r.fala, 'ia');
@@ -813,7 +855,7 @@
         // Com a IA do Google configurada, a conversa é livre; sem ela, segue as regras do app.
         conversa.ia = !!(estado.dados && estado.dados.ia);
         if (conversa.ia) {
-          conversa.historico = [{ quem: 'ia', texto: nomeCurto(e.pessoa) + ', venha lançar a sua produção ' + faixaFalada() + '.' }, { quem: 'pessoa', texto: texto }];
+          conversa.historico = [{ quem: 'ia', texto: nomeCurto(e.pessoa) + ', venha lançar a sua produção.' }, { quem: 'pessoa', texto: texto }];
           return perguntarIA();
         }
         if (linhas.length) return confirmar(linhas);
@@ -822,7 +864,17 @@
       return;
     }
     conversa.textos.push(texto);
-    if (conversa.etapa === 'ia') { conversa.historico.push({ quem: 'pessoa', texto: texto }); return perguntarIA(); }
+    anotarParcial('');
+    if (conversa.etapa === 'ia') {
+      var proposta = conversa.proposta; conversa.proposta = null;
+      if (proposta && /\b(sim|isso|certo|correto|exato|pode|confirmo|confirma|manda|beleza|ok)\b/.test(t)
+          && !/\b(nao|errado|errei|espera|mas|corrig|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez)\b|\d/.test(t)) {
+        conversa.linhas = proposta;
+        return gravarConversa();
+      }
+      conversa.historico.push({ quem: 'pessoa', texto: texto });
+      return perguntarIA();
+    }
     // Sem a IA: frase sem número nem resposta conhecida é conversa paralela da sala, ignora e continua ouvindo.
     var temNumero = /\d|\b(um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|quinze|vinte|trinta)\b/.test(t);
     var resposta = /\b(sim|isso|certo|correto|exato|pode|confirmo|confirma|manda|beleza|ok|nao|errado|errei|espera|corrig|nada|nenhum|nenhuma|esqueci|lembro|sei)/.test(t);
@@ -975,7 +1027,6 @@
   aCadaTique(function () { if ($('tChamada').classList.contains('ativa')) mostrarProximo(); });
 
   function nomeCurto(nome) { return bonito(nome.split(/\s+/).slice(0, 2).join(' ')); }
-  function faixaFalada() { return 'das ' + chamada.hora + ' e meia às ' + ((chamada.hora + 1) % 24) + ' e meia'; }
   function pendentesReais() { return chamada.fila.filter(function (n) { return n !== chamada.teste; }); }
 
   // 3 s antes de falar, pega a lista da vez: o primeiro computador lê a planilha (lançamentos de todos) e os outros
@@ -1013,7 +1064,7 @@
     var juntos = nomes.length > 1 ? nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1] : nomes[0];
     var depois = alvo + ESPERA;
     pararDeOuvir();
-    falar((chamada.rodada > 1 ? 'Chamando de novo. ' : '') + 'Falta a produção ' + faixaFalada() + (nomes.length > 1 ? ' de: ' : ' de ') + juntos + '.',
+    falar((chamada.rodada > 1 ? 'Chamando de novo. ' : '') + 'Falta a produção' + (nomes.length > 1 ? ' de: ' : ' de ') + juntos + '.',
       function () { ouvirRespostas(depois - 5000); });
     desenharChamada();
     agendar(depois - 3000, function () { fimDaEspera(depois); });
@@ -1048,7 +1099,7 @@
     nome = nome || chamada.fila[0];
     if (!nome) return;
     chamada.vezes[nome] = Math.max(1, chamada.vezes[nome] || 0);
-    falar(nomeCurto(nome) + ', falta a sua produção ' + faixaFalada() + '.');
+    falar(nomeCurto(nome) + ', falta a sua produção.');
     desenharChamada();
   }
 
@@ -1058,7 +1109,7 @@
     if (!nome) return;
     if (chamada.vezes[nome] < 2) {
       chamada.vezes[nome] = 2; avisar('Teste: 2 minutos sem resposta. Chamando a segunda vez.');
-      falar(nomeCurto(nome) + ', falta a sua produção ' + faixaFalada() + '. Segunda chamada.');
+      falar(nomeCurto(nome) + ', falta a sua produção. Segunda chamada.');
       chamada.timerTeste = setTimeout(testeSemResposta, ESPERA); desenharChamada(); return;
     }
     chamada.teste = null;
@@ -1205,7 +1256,7 @@
     conversa.teste = true; conversa.vez = e; conversa.etapa = 'chamando';
     conversa.linhas = null; conversa.textos = []; conversa.historico = []; conversa.tentativas = 0;
     window.scrollTo(0, 0);
-    falar('Teste de conversa. ' + nomeCurto(n) + ', venha lançar a sua produção ' + faixaFalada() + '. Quando chegar no computador, diga: sou eu.', function () {
+    falar('Teste de conversa. ' + nomeCurto(n) + ', venha lançar a sua produção. Quando chegar no computador, diga: sou eu.', function () {
       if (!conversa.teste || conversa.vez !== e) return;
       conversa.etapa = 'esperando';
       ouvirRespostas(agoraCerto() + 60000, ouviuNaConversa);

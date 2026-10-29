@@ -356,3 +356,11 @@ test('controles de PlayStation: DualSense, DualSense Edge e Raiju pelo ditado', 
   assert.deepStrictEqual(um('Ana Clara um controle de playstation finalizado'), ['DUAL SENSE|DUALSENSE EDGE|RAIJU', 0, 1]);
   assert.deepStrictEqual(um('Ana Clara 2 playstation 5 testados'), ['PLAYSTATION 5', 2, 0]);
 });
+
+test('testado é aprovado: "testei 2 e deu defeito" vai só para defeitos', () => {
+  const l = leitor();
+  assert.deepStrictEqual(resumo(l.ler('Ana Leal testei 2 notebooks e deu defeito', '')), [['ANA LEAL', 'NOTEBOOK', 0, 0, 2]]);
+  assert.deepStrictEqual(resumo(l.ler('Ana Leal 2 notebooks testados com defeito', '')), [['ANA LEAL', 'NOTEBOOK', 0, 0, 2]]);
+  assert.deepStrictEqual(resumo(l.ler('Ana Leal 3 notebooks testados, não teve defeito', '')), [['ANA LEAL', 'NOTEBOOK', 3, 0, 0]]);
+  assert.deepStrictEqual(resumo(l.ler('Ana Leal 2 notebooks testados e finalizados', '')), [['ANA LEAL', 'NOTEBOOK', 2, 2, 0]]);
+});
