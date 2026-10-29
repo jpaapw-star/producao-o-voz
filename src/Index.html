@@ -592,9 +592,11 @@
     try {
       var u = new SpeechSynthesisUtterance(texto);
       if (depois) { var feito = false; u.onend = u.onerror = function () { if (!feito) { feito = true; depois(); } }; }
-      u.lang = 'pt-BR'; u.rate = 0.95;
+      u.lang = 'pt-BR'; u.rate = 1.05;
       var nome = guardar.ler('voz');
       var v = nome && vozes().filter(function (x) { return x.name === nome; })[0];
+      // Sem voz escolhida: a voz "Natural" (online) do Edge, que soa mais como gente.
+      if (!v) v = vozes().filter(function (x) { return /^pt-BR/i.test(x.lang) && /natural|online/i.test(x.name); })[0];
       if (v) { u.voice = v; u.lang = v.lang; }
       window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
     } catch (e) { if (depois) depois(); }
@@ -622,7 +624,21 @@
           if (ehEco(dito)) continue;
           // A pessoa falou por cima: o computador se cala e escuta.
           if (falandoAgora) { falandoAgora = ''; try { window.speechSynthesis.cancel(); } catch (x) {} }
-          if (e.results[i].isFinal) tratar(dito); else if (parcial) parcial(dito);
+          clearTimeout(fimCedo);
+          if (e.results[i].isFinal) {
+            if (adiantado && semAcentoMin(dito) === semAcentoMin(adiantado)) { adiantado = ''; continue; }
+            adiantado = ''; tratar(dito);
+          } else if (parcial) {
+            parcial(dito);
+            // Fim de fala adiantado: com meio segundo de silêncio e uma fala já completa (produção, sim ou não),
+            // responde sem esperar o navegador fechar a frase (ele espera mais de 1 s).
+            if (fraseCompleta(dito)) fimCedo = setTimeout(function (t) { return function () {
+              if (ouvindo !== r) return;
+              adiantado = t;
+              try { r.abort(); } catch (x) {}
+              tratar(t);
+            }; }(dito), 550);
+          }
         }
       };
       r.onerror = function (e) {
@@ -647,7 +663,17 @@
     var w = semAcentoMin(t).split(' ').filter(Boolean);
     return !w.length || w.every(function (x) { return f.indexOf(' ' + x + ' ') >= 0; });
   }
+  var fimCedo = null, adiantado = '';
+  function fraseCompleta(t) {
+    var e = conversa.vez;
+    if (!e || !e.pessoa || conversa.etapa === 'esperando' || conversa.etapa === 'chamando') return false;
+    var n = semAcentoMin(t);
+    // "sim", "isso mesmo", "pode mandar" (curto e sem número) já é resposta completa.
+    if (n.split(' ').length <= 4 && !/\d/.test(n) && /^(sim|isso|certo|correto|exato|pode|confirmo|beleza|ok|perfeito)\b/.test(n) && !/\b(nao|mas)\b/.test(n)) return true;
+    return linhasDaPessoa(t, e.pessoa).length > 0 && !/\b(e|mais|tambem|depois|com|de)$/.test(n);
+  }
   function pararDeOuvir() {
+    clearTimeout(fimCedo);
     var r = ouvindo; ouvindo = null;
     if (r) { try { r.abort(); } catch (e) {} }
     $('ouvindo').textContent = '';
@@ -808,6 +834,26 @@
     }).catch(function (x) { encerrarConversa('Não consegui gravar. Lance pela tela, por favor.'); avisar('Não gravou: ' + mensagem(x)); });
   }
 
+  // Fala simples que o app entende sozinho ("2 notebooks finalizados"): repete na hora, sem esperar a IA.
+  // Dúvida, esquecimento ou testado junto com defeito (pode ser "dos testados, 2 deram defeito") ficam com a IA.
+  function entendeuSozinho(texto, linhas) {
+    var t = semAcentoMin(texto);
+    if (/\b(acho|sei la|nao sei|nao lembro|esqueci|mais ou menos|tipo|quase|uns|umas|talvez)\b/.test(t)) return false;
+    return !linhas.some(function (l) { return l.testados && l.defeitos; });
+  }
+  // "3 notebooks finalizados … e 2 roteadores": o que veio depois completa o resumo, não troca.
+  function juntarLinhas(antigas, novas) {
+    var cats = novas.map(function (l) { return l.categoria; });
+    return (antigas || []).filter(function (l) { return cats.indexOf(l.categoria) < 0; }).concat(novas);
+  }
+  function confirmarRapido(linhas) {
+    var frase = linhas.map(resumoSemNome).join('; ') + '. Está certo?';
+    conversa.proposta = linhas;
+    mostrarAnotacao(linhas);
+    conversa.historico.push({ quem: 'ia', texto: frase });
+    dizerEOuvir(frase, 'ia');
+  }
+
   // A IA entende a fala (erros de ditado, "é… hum…", correções, esquecimento) e decide o que dizer; o app só fala e grava.
   function perguntarIA() {
     var e = conversa.vez;
@@ -815,6 +861,9 @@
     conversa.etapa = 'pensando';
     mostrarConversa('Pensando…');
     if (!conversa.teste) chamar('apiPegarVez', chamada.hora, e.falarEm, aparelho).catch(function () {});
+    // Se a IA demorar, fala algo curto para não ficar em silêncio.
+    var pedido = conversa.pedidoIA = (conversa.pedidoIA || 0) + 1;
+    setTimeout(function () { if (conversa.etapa === 'pensando' && conversa.pedidoIA === pedido) falar('Hum, deixa eu ver.'); }, 1500);
     chamar('apiConversar', { pessoa: e.pessoa, hora: chamada.hora, historico: conversa.historico }).then(function (r) {
       if (!conversa.vez || conversa.vez.falarEm !== e.falarEm) return;
       conversa.historico.push({ quem: 'ia', texto: r.fala });
@@ -856,7 +905,11 @@
         conversa.ia = !!(estado.dados && estado.dados.ia);
         if (conversa.ia) {
           conversa.historico = [{ quem: 'ia', texto: nomeCurto(e.pessoa) + ', venha lançar a sua produção.' }, { quem: 'pessoa', texto: texto }];
-          return perguntarIA();
+          if (linhas.length && entendeuSozinho(texto, linhas)) return confirmarRapido(linhas);
+          // A saudação não precisa da IA: responde na hora.
+          var oi = 'Oi, ' + primeiroNome(e.pessoa) + '. O que você fez?';
+          conversa.historico.push({ quem: 'ia', texto: oi });
+          return dizerEOuvir(oi, 'ia');
         }
         if (linhas.length) return confirmar(linhas);
         dizerEOuvir('Oi, ' + primeiroNome(e.pessoa) + '. Pode falar o que você fez nesta faixa.', 'producao');
@@ -873,6 +926,7 @@
         return gravarConversa();
       }
       conversa.historico.push({ quem: 'pessoa', texto: texto });
+      if (linhas.length && entendeuSozinho(texto, linhas)) return confirmarRapido(proposta && !/\b(nao|errado|errei|corrig)/.test(t) ? juntarLinhas(proposta, linhas) : linhas);
       return perguntarIA();
     }
     // Sem a IA: frase sem número nem resposta conhecida é conversa paralela da sala, ignora e continua ouvindo.
@@ -890,7 +944,7 @@
     if (conversa.etapa === 'confirmar') {
       var nao = /\b(nao|errado|errei|espera|corrig)/.test(t);
       if (!nao && /\b(sim|isso|certo|correto|exato|pode|confirmo|confirma|manda|beleza|ok)\b/.test(t)) return gravarConversa();
-      if (linhas.length) return confirmar(linhas);
+      if (linhas.length) return confirmar(nao || conversa.linhas === 'nada' ? linhas : juntarLinhas(conversa.linhas, linhas));
       if (nao) return dizerEOuvir('Tudo bem. Fala de novo o que você fez.', 'producao');
       return dizerEOuvir('Está certo? Responda sim ou não.', 'confirmar');
     }
