@@ -46,6 +46,12 @@ A página do Apps Script fica dentro de um quadro do Google que bloqueia o micro
 2. A cada mudança o site é publicado sozinho, logo depois do Apps Script.
 3. Nos computadores da chamada, use esse endereço (o abrir-chamada.bat já aponta para ele). Na primeira vez, o Edge pergunta do microfone: clique em **Permitir**.
 
+## Ensinar a IA (abas Exemplos e Conversas)
+
+- **Conversas**: cada conversa da chamada vira uma linha, com o que a pessoa disse, o que o computador falou, o resultado e quanto a IA demorou. Os testes do botão Conversar aparecem com "(teste)". Ficam guardadas as últimas 3000.
+- **Exemplos**: escreva na coluna A uma frase do jeito que a equipe fala e na coluna B o que ela quer dizer, por exemplo "passei 3 note no teste" = "3 notebooks testados". A IA segue esses exemplos em toda conversa; quando ela errar, copie a frase da aba Conversas para cá com o resultado certo. Valem as últimas 40 linhas.
+- A IA também usa a aba **Apelidos** e o costume de cada pessoa (o que ela lançou nas últimas semanas). Mudanças nessas abas entram em até 10 minutos.
+
 ## IA da conversa (opcional, grátis)
 
 Com a IA do Google, a conversa entende erros de fala, "é… hum…", correções e ajuda quem esqueceu.

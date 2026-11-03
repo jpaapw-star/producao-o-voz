@@ -798,6 +798,7 @@
     conversa.etapa = etapa;
     if (!conversa.teste) chamar('apiPegarVez', chamada.hora, e.falarEm, aparelho).catch(function () {});
     falandoAgora = frase;
+    registrar('app', frase);
     ouvirRespostas(agoraCerto() + 40000 + frase.length * 90, ouviuNaConversa);
     mostrarConversa(etapa === 'confirmar' ? 'Esperando ' + primeiroNome(e.pessoa) + ' confirmar…' : 'Ouvindo ' + primeiroNome(e.pessoa) + '…');
     falar(frase, function () {
@@ -811,8 +812,21 @@
     conversa.linhas = linhas;
     dizerEOuvir(linhas.map(resumoSemNome).join('; ') + '. Está certo?', 'confirmar');
   }
+  // Registro da conversa (aba Conversas): o que a pessoa disse, o que o computador falou e o resultado.
+  function registrar(quem, texto) { if (conversa.registro && texto) conversa.registro.falas.push({ quem: quem, texto: texto }); }
+  function enviarRegistro(e, frase) {
+    var r = conversa.registro;
+    conversa.registro = null;
+    if (!r) return;
+    r.falas.push({ quem: 'app', texto: frase });
+    chamar('apiRegistrarConversa', {
+      aparelho: aparelho, teste: conversa.teste, pessoa: e && e.pessoa, falas: r.falas,
+      resultado: r.resultado || frase, chamadasIA: r.chamadasIA, msIA: r.msIA, duracao: Date.now() - r.inicio
+    }).catch(function () {});
+  }
   function encerrarConversa(frase) {
     var e = conversa.vez;
+    enviarRegistro(e, frase);
     pararDeOuvir();
     conversa.etapa = 'gravando';
     mostrarConversa(''); mostrarAnotacao(null); conversa.proposta = null;
@@ -836,11 +850,13 @@
     if (conversa.teste) {
       var seria = conversa.linhas === 'nada' ? 'nada nesta faixa' : conversa.linhas.map(resumoSemNome).join('; ');
       avisar('Teste: gravaria ' + seria + '. Nada foi enviado.', '', null, 20000);
+      if (conversa.registro) conversa.registro.resultado = 'Teste: gravaria ' + seria;
       return encerrarConversa('Teste: eu gravaria ' + seria + '. Como é teste, nada foi enviado para a planilha.');
     }
     if (conversa.linhas === 'nada') {
       responder(e.pessoa, 'nada');
       if (chamada.nada.indexOf(e.pessoa) < 0) chamada.nada.push(e.pessoa);
+      if (conversa.registro) conversa.registro.resultado = 'Nada nesta faixa';
       return encerrarConversa('Anotado: nada nesta faixa. Obrigado!');
     }
     chamar('apiGravar', {
@@ -850,6 +866,7 @@
       if (r && r.repetidas) return encerrarConversa('Você já tinha lançamento nesta faixa, então não gravei de novo.');
       if (chamada.feitos.indexOf(e.pessoa) < 0) chamada.feitos.push(e.pessoa);
       avisar('Conversa gravada: ' + conversa.linhas.map(resumoLinha).join('; ') + '.', '', null, 15000);
+      if (conversa.registro) conversa.registro.resultado = 'Gravou: ' + conversa.linhas.map(resumoSemNome).join('; ');
       encerrarConversa('Enviado para a planilha. Obrigado, ' + primeiroNome(e.pessoa) + '!');
     }).catch(function (x) { encerrarConversa('Não consegui gravar. Lance pela tela, por favor.'); avisar('Não gravou: ' + mensagem(x)); });
   }
@@ -882,10 +899,11 @@
     mostrarConversa('Pensando…');
     if (!conversa.teste) chamar('apiPegarVez', chamada.hora, e.falarEm, aparelho).catch(function () {});
     // Se a IA demorar, fala algo curto para não ficar em silêncio.
-    var pedido = conversa.pedidoIA = (conversa.pedidoIA || 0) + 1;
+    var pedido = conversa.pedidoIA = (conversa.pedidoIA || 0) + 1, t0 = Date.now();
     setTimeout(function () { if (conversa.etapa === 'pensando' && conversa.pedidoIA === pedido) falar('Hum, deixa eu ver.'); }, 1500);
     chamar('apiConversar', { pessoa: e.pessoa, hora: chamada.hora, historico: conversa.historico }).then(function (r) {
       if (!conversa.vez || conversa.vez.falarEm !== e.falarEm) return;
+      if (conversa.registro) { conversa.registro.chamadasIA++; conversa.registro.msIA += Date.now() - t0; }
       conversa.historico.push({ quem: 'ia', texto: r.fala });
       var linhas = (r.linhas || []).map(function (x) { return { pessoa: e.pessoa, categoria: x.categoria, testados: x.testados, finalizados: x.finalizados, defeitos: x.defeitos }; });
       if (r.acao === 'gravar' && linhas.length) { conversa.linhas = linhas; return gravarConversa(); }
@@ -918,6 +936,7 @@
       pararDeOuvir();
       conversa.etapa = 'pegando';
       conversa.textos = [texto]; conversa.tentativas = 0; conversa.linhas = null;
+      conversa.registro = { inicio: Date.now(), falas: [{ quem: 'pessoa', texto: texto }], chamadasIA: 0, msIA: 0, resultado: '' };
       (conversa.teste ? Promise.resolve({ ok: true, vez: e }) : chamar('apiPegarVez', chamada.hora, e.falarEm, aparelho)).then(function (r) {
         if (!r.ok) { conversa.etapa = ''; return seguirVez(r.vez); }
         conversa.vez = r.vez;
@@ -937,6 +956,7 @@
       return;
     }
     conversa.textos.push(texto);
+    registrar('pessoa', texto);
     anotarParcial('');
     if (conversa.etapa === 'ia') {
       var proposta = conversa.proposta; conversa.proposta = null;

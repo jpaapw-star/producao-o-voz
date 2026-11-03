@@ -10,11 +10,14 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.17.1';
+var VERSAO = '1.18.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
 var CHAMADA_ABA = 'Chamada';
+var EXEMPLOS_ABA = 'Exemplos';
+var CONVERSAS_ABA = 'Conversas';
+var CONVERSAS_MAX = 3000;
 var AGENDA_ABA = 'Agenda da chamada';
 var CHAMADA_CABECALHO = ['QUANDO', 'DATA', 'FAIXA', 'PESSOA', 'RESPOSTA'];
 var RESPOSTAS = ['lançou', 'nada', 'não veio', 'não respondeu'];
@@ -984,7 +987,61 @@ function autorizarIA() {
   return r;
 }
 
-function promptConversa_(pessoa, faixa, categorias) {
+// Aba "Exemplos": FRASE | O QUE É (como a equipe fala e o resultado certo). A IA recebe os últimos 40.
+function exemplos_(ss) {
+  var aba = abaPorNome_(ss, EXEMPLOS_ABA);
+  if (!aba) {
+    aba = ss.insertSheet(EXEMPLOS_ABA, ss.getSheets().length);
+    aba.appendRow(['FRASE (como a pessoa fala)', 'O QUE É (resultado certo)']);
+    aba.appendRow(['passei 3 note no teste', '3 notebooks testados']);
+    aba.appendRow(['testei 2 roteador e deu ruim nos dois', '2 roteadores com defeito']);
+    aba.setFrozenRows(1);
+  }
+  var n = aba.getLastRow();
+  if (n < 2) return [];
+  return aba.getRange(2, 1, n - 1, 2).getValues()
+    .map(function (r) { return [String(r[0]).trim(), String(r[1]).trim()]; })
+    .filter(function (r) { return r[0] && r[1]; }).slice(-40);
+}
+
+// O que a IA precisa saber da equipe: exemplos, apelidos e o costume de cada pessoa. Guardado por 10 min,
+// para não ler a planilha a cada resposta.
+function contextoIA_(ss, l) {
+  var cache = CacheService.getScriptCache();
+  var guardado = cache.get('contextoIA');
+  if (guardado) return JSON.parse(guardado);
+  var ctx = { exemplos: [], apelidos: [], habitos: {} };
+  try { ctx.exemplos = exemplos_(ss); } catch (e) {}
+  try { ctx.apelidos = apelidos_(ss, l); } catch (e) {}
+  try {
+    var aba = abaPorNome_(ss, 'Registros');
+    var col = colunasRegistros_(aba);
+    ctx.habitos = habitos_(aba, col, ultimaLinhaComDados_(aba, col), ss.getSpreadsheetTimeZone(), l.pessoas).habitos;
+  } catch (e) {}
+  var texto = JSON.stringify(ctx);
+  if (texto.length < 90000) cache.put('contextoIA', texto, 600);
+  return ctx;
+}
+
+function textoContexto_(ctx, pessoaCompleta) {
+  var partes = [];
+  var h = ctx.habitos && ctx.habitos[pessoaCompleta];
+  if (h && h.categorias && h.categorias.length) {
+    partes.push('Costume desta pessoa nas últimas semanas: ' + h.categorias.slice(0, 4).join(', ')
+      + (h.tipo ? ' (quase sempre ' + h.tipo + ')' : '') + '. Se ela disser só o número, sugira o costume na pergunta '
+      + '("4 caixas de som finalizadas?"), mas nunca grave sem ela confirmar.');
+  }
+  if (ctx.apelidos && ctx.apelidos.length) {
+    partes.push('Apelidos usados na equipe: ' + ctx.apelidos.slice(0, 60).map(function (a) { return '"' + a[0] + '" = ' + a[1]; }).join('; ') + '.');
+  }
+  if (ctx.exemplos && ctx.exemplos.length) {
+    partes.push('Exemplos reais de como a equipe fala e o que significa (siga estes exemplos):\n'
+      + ctx.exemplos.map(function (x) { return '- "' + x[0] + '" = ' + x[1]; }).join('\n'));
+  }
+  return partes.join('\n');
+}
+
+function promptConversa_(pessoa, faixa, categorias, contexto) {
   return [
     'Você é a voz da chamada de produção de uma equipe de assistência técnica. Está conversando por voz, num computador da sala, com '
       + pessoa + ' sobre a produção da faixa ' + faixa + '.',
@@ -1008,8 +1065,39 @@ function promptConversa_(pessoa, faixa, categorias) {
     'Se ela disser que não fez nada nesta faixa, confirme; quando confirmar, use acao "nada". Se ela pedir para parar, use acao "desistir".',
     'Na sala há conversas paralelas e o microfone pega outras pessoas. Se o texto claramente não for resposta para você '
       + '(assunto de outra conversa, outra pessoa chamada), use acao "ignorar" e fala vazia.',
-    'Nunca invente números. Responda só o JSON pedido.'
+    'Nunca invente números. Responda só o JSON pedido.',
+    contexto || ''
   ].join('\n');
+}
+
+// Aba "Conversas": uma linha por conversa da chamada (o que a pessoa disse, o que o computador falou e o resultado),
+// para achar onde a conversa trava ou entende errado. Guarda as últimas 3000.
+function apiRegistrarConversa(reg) {
+  reg = reg || {};
+  var ss = abrir_(config_());
+  var aba = ss.getSheetByName(CONVERSAS_ABA);
+  if (!aba) {
+    aba = ss.insertSheet(CONVERSAS_ABA, ss.getSheets().length);
+    aba.appendRow(['QUANDO', 'APARELHO', 'PESSOA', 'CONVERSA', 'RESULTADO', 'RESPOSTAS DA IA', 'DEMORA DA IA (s)', 'DURAÇÃO (s)']);
+    aba.setFrozenRows(1);
+  }
+  var tz = ss.getSpreadsheetTimeZone();
+  var falas = (reg.falas || []).slice(0, 60).map(function (x) {
+    return (x.quem === 'pessoa' ? 'Pessoa: ' : 'App: ') + String(x.texto || '').slice(0, 300);
+  }).join('\n');
+  aba.appendRow([
+    Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy HH:mm:ss'),
+    String(reg.aparelho || '').slice(0, 60) + (reg.teste ? ' (teste)' : ''),
+    String(reg.pessoa || '').slice(0, 80),
+    falas,
+    String(reg.resultado || '').slice(0, 300),
+    Number(reg.chamadasIA) || 0,
+    Math.round((Number(reg.msIA) || 0) / 100) / 10,
+    Math.round((Number(reg.duracao) || 0) / 100) / 10
+  ]);
+  var n = aba.getLastRow();
+  if (n > CONVERSAS_MAX + 1) aba.deleteRows(2, n - CONVERSAS_MAX - 1);
+  return { ok: true };
 }
 
 function apiConversar(pedido) {
@@ -1028,7 +1116,8 @@ function apiConversar(pedido) {
   while (contents.length && contents[0].role === 'model') contents.shift();
   if (!contents.length) contents = [{ role: 'user', parts: [{ text: 'sou eu' }] }];
   var corpo = {
-    systemInstruction: { parts: [{ text: promptConversa_(nome, f.inicio + ' às ' + f.fim, l.categorias) }] },
+    systemInstruction: { parts: [{ text: promptConversa_(nome, f.inicio + ' às ' + f.fim, l.categorias,
+      textoContexto_(contextoIA_(ss, l), String(pedido.pessoa || ''))) }] },
     contents: contents,
     generationConfig: {
       temperature: 0.3,
