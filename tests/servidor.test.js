@@ -107,15 +107,32 @@ test('coluna de quantidade faltando no cabeçalho avisa em vez de gravar errado'
   assert.throws(() => s.apiGravar({ quem: 'ANA LEAL', hora: 9, linhas: [{ pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', testados: 1 }] }), /coluna de: defeitos/);
 });
 
-test('aba Apelidos é criada vazia e depois lida, só com nomes da lista', () => {
+test('aba Apelidos: escondida, limpa sozinha (nome fora da lista, repetido, sem uso há 60 dias)', () => {
   const p = planilha();
   const s = carregarServidor(p);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().apelidos)), []);
   const aba = p.getSheetByName('Apelidos');
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(aba.dados[0])), ['APELIDO', 'NOME OU CATEGORIA']);
-  aba.dados.push(['Dani', 'daniel vargas'], ['som', 'CAIXA DE SOM'], ['Zé', 'FULANO'], ['', 'FONE']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(aba.dados[0])), ['APELIDO', 'NOME OU CATEGORIA', 'ÚLTIMO USO']);
+  const velho = new Date(Date.now() - 90 * 864e5);
+  aba.dados.push(['Dani', 'daniel vargas', ''], ['som', 'CAIXA DE SOM', ''], ['Zé', 'FULANO', ''], ['', 'FONE', ''],
+    ['dani', 'DANIEL VARGAS', ''], ['note velho', 'NOTEBOOK', velho]);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().apelidos)), [['Dani', 'DANIEL VARGAS'], ['som', 'CAIXA DE SOM']]);
-  assert.deepStrictEqual(aba.dados.map((l) => l[2]), ['SITUAÇÃO', 'ok', 'ok', 'não achei esse nome em Configurações', 'falta o apelido']);
+  const cheias = aba.dados.filter((l) => l[0]);
+  assert.strictEqual(cheias.length, 3, 'cabeçalho + 2 apelidos; o resto foi apagado');
+  assert.match(String(cheias[1][2]), /^\d{2}\/\d{2}\/\d{4}$/, 'ganha a data de uso');
+});
+
+test('apelidos aprendidos pela IA entram sozinhos quando a conversa grava', () => {
+  const p = planilha();
+  const s = carregarServidor(p);
+  s.SEGREDOS.iaChave = 'k';
+  s.UrlFetchApp = { fetch: () => ({ getResponseCode: () => 200, getContentText: () => JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+    fala: '3 notebooks finalizados. Está certo?', acao: 'confirmar', linhas: [{ categoria: 'NOTEBOOK', finalizados: 3 }],
+    apelidos: [{ dito: 'note', significa: 'notebook' }, { dito: 'geladeira', significa: 'GELADEIRA' }, { dito: 'Ana Leal', significa: 'ANA LEAL' }] }) }] } }] }) }) };
+  s.apiConversar({ pessoa: 'ANA LEAL', hora: 9, historico: [{ quem: 'pessoa', texto: 'fiz 3 note' }] });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().apelidos)), [], 'só aprende depois de gravar');
+  s.apiGravar({ quem: 'Aparelho X (conversa na chamada)', hora: 9, texto: 'fiz 3 note / sim', linhas: [{ pessoa: 'ANA LEAL', categoria: 'NOTEBOOK', finalizados: 3 }] });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(s.apiInicio().apelidos)), [['note', 'NOTEBOOK']]);
 });
 
 test('início traz supervisores e máximos da Referência Metas', () => {
@@ -394,4 +411,35 @@ test('IA: testado já é ok, não pergunta de defeito', () => {
   assert.match(p, /Nunca pergunte se os testados deram defeito/);
   assert.match(p, /conte só em defeitos/);
   assert.match(p, /Nunca fale o horário/);
+});
+
+test('IA aprende com a equipe: exemplos, apelidos e costume da pessoa vão no prompt', () => {
+  const p = planilha();
+  const s = carregarServidor(p);
+  s.SEGREDOS.iaChave = 'k';
+  let prompt = '';
+  s.UrlFetchApp = { fetch: (url, o) => {
+    prompt = JSON.parse(o.payload).systemInstruction.parts[0].text;
+    return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ fala: 'Quantas?', acao: 'perguntar' }) }] } }] }) };
+  } };
+  s.apiConversar({ pessoa: 'DANIEL VARGAS', hora: 9, historico: [{ quem: 'pessoa', texto: 'fiz 4' }] });
+  const ex = p.getSheetByName('Exemplos');
+  assert.ok(ex, 'cria a aba Exemplos');
+  assert.match(prompt, /"passei 3 note no teste" = 3 notebooks testados/);
+  assert.match(prompt, /Costume desta pessoa.*CAIXA DE SOM/);
+});
+
+test('aba Conversas registra o que foi dito e o resultado', () => {
+  const p = planilha();
+  const s = carregarServidor(p);
+  s.apiRegistrarConversa({ aparelho: 'Aparelho AB12', teste: true, pessoa: 'ANA LEAL', resultado: 'Teste: gravaria notebook, 2 com defeito',
+    falas: [{ quem: 'pessoa', texto: 'sou eu' }, { quem: 'app', texto: 'Oi, Ana. O que você fez?' }], chamadasIA: 1, msIA: 2340, duracao: 12000 });
+  const aba = p.getSheetByName('Conversas');
+  assert.ok(aba);
+  const l = aba.dados[1];
+  assert.strictEqual(l[1], 'Aparelho AB12 (teste)');
+  assert.strictEqual(l[3], 'Pessoa: sou eu\nApp: Oi, Ana. O que você fez?');
+  assert.strictEqual(l[5], 1);
+  assert.strictEqual(l[6], 2.3);
+  assert.strictEqual(l[7], 12);
 });

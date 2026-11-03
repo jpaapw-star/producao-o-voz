@@ -54,6 +54,7 @@ function criarPlanilha(abas) {
     abas: lista,
     getSheets: () => lista,
     getSheetByName: (n) => lista.find((a) => a.getName() === n) || null,
+    deleteRows: () => {},
     insertSheet: (n) => { const a = criarAba(n, []); lista.push(a); return a; },
     getSpreadsheetTimeZone: () => 'America/Sao_Paulo'
   };

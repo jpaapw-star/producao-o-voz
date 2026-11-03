@@ -10,11 +10,14 @@
  * ou das Propriedades do script.
  */
 
-var VERSAO = '1.17.1';
+var VERSAO = '1.18.0';
 var LOG_ABA = 'Lançamentos por voz';
 var APELIDOS_ABA = 'Apelidos';
 var HORARIOS_ABA = 'Horários';
 var CHAMADA_ABA = 'Chamada';
+var EXEMPLOS_ABA = 'Exemplos';
+var CONVERSAS_ABA = 'Conversas';
+var CONVERSAS_MAX = 3000;
 var AGENDA_ABA = 'Agenda da chamada';
 var CHAMADA_CABECALHO = ['QUANDO', 'DATA', 'FAIXA', 'PESSOA', 'RESPOSTA'];
 var RESPOSTAS = ['lançou', 'nada', 'não veio', 'não respondeu'];
@@ -147,34 +150,80 @@ function listas_(ss) {
   return { pessoas: listaDaColuna_(cfgAba, colPessoas), categorias: listaDaColuna_(cfgAba, colCategorias), supervisores: supervisores };
 }
 
-// Aba "Apelidos": APELIDO | NOME OU CATEGORIA. Criada vazia na primeira vez; você mesmo preenche.
+// Aba "Apelidos" (escondida): APELIDO | NOME OU CATEGORIA | ÚLTIMO USO. Preenchida sozinha com os apelidos que a IA
+// aprende nas conversas confirmadas, e limpa sozinha: sai o que não bate com Configurações, repetido ou sem uso há 60 dias.
+var APELIDOS_CAB = ['APELIDO', 'NOME OU CATEGORIA', 'ÚLTIMO USO'];
+var APELIDOS_DIAS = 60;
+
 function apelidos_(ss, l) {
+  return linhasApelidos_(ss, l).map(function (r) { return [r[0], r[1]]; });
+}
+
+function linhasApelidos_(ss, l, novos, texto) {
+  var tz = ss.getSpreadsheetTimeZone();
+  var hoje = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
   var aba = abaPorNome_(ss, APELIDOS_ABA);
   if (!aba) {
     aba = ss.insertSheet(APELIDOS_ABA, ss.getSheets().length);
-    aba.appendRow(['APELIDO', 'NOME OU CATEGORIA']);
+    aba.appendRow(APELIDOS_CAB);
     aba.setFrozenRows(1);
-    return [];
+    try { aba.hideSheet(); } catch (e) {}
   }
+  var cab = aba.getRange(1, 1, 1, 3).getValues()[0].map(function (v) { return String(v).trim(); });
+  var formatoNovo = cab[2] === APELIDOS_CAB[2];
   var oficial = {};
   l.pessoas.concat(l.categorias).forEach(function (x) { oficial[semAcento_(x)] = x; });
   var n = aba.getLastRow();
-  if (n < 2) return [];
-  var vals = aba.getRange(2, 1, n - 1, 3).getValues();
-  var lista = [], mudou = false;
-  // Coluna C diz se o app entendeu a linha, para você ver na hora um nome escrito errado.
-  var situacao = vals.map(function (r) {
-    var apelido = String(r[0]).trim(), alvo = oficial[semAcento_(r[1])];
-    var txt = !apelido && !String(r[1]).trim() ? '' : !apelido ? 'falta o apelido' : !alvo ? 'não achei esse nome em Configurações' : 'ok';
-    if (apelido && alvo) lista.push([apelido, alvo]);
-    if (String(r[2]) !== txt) mudou = true;
-    return [txt];
-  });
-  if (mudou) {
-    if (!String(aba.getRange(1, 3).getValue())) aba.getRange(1, 3).setValue('SITUAÇÃO');
-    aba.getRange(2, 3, situacao.length, 1).setValues(situacao);
+  var vals = n >= 2 ? aba.getRange(2, 1, n - 1, 3).getValues() : [];
+  var falado = ' ' + semAcento_(texto || '').replace(/[^a-z0-9 ]/g, ' ') + ' ';
+  var linhas = [], indice = {};
+  function por(apelido, alvo, uso) {
+    var k = semAcento_(apelido);
+    if (!apelido || !alvo || oficial[k] || apelido.length > 30) return;
+    if (falado.indexOf(' ' + k + ' ') >= 0) uso = hoje;
+    if ((Date.parse(hoje) - Date.parse(uso)) / 864e5 > APELIDOS_DIAS) return;
+    if (indice[k] !== undefined) { var j = linhas[indice[k]]; linhas[indice[k]] = [j[0], j[1], uso > j[2] ? uso : j[2]]; return; }
+    indice[k] = linhas.length;
+    linhas.push([apelido, alvo, uso]);
   }
-  return lista;
+  vals.forEach(function (r) {
+    por(String(r[0]).trim(), oficial[semAcento_(r[1])], (formatoNovo && dataTexto_(r[2], tz)) || hoje);
+  });
+  // Aprendido agora vale mais que o antigo (a pessoa acabou de confirmar).
+  (novos || []).forEach(function (x) {
+    var k = semAcento_(x[0]);
+    if (indice[k] !== undefined) linhas[indice[k]][1] = oficial[semAcento_(x[1])] || linhas[indice[k]][1];
+    por(String(x[0]).trim(), oficial[semAcento_(x[1])], hoje);
+  });
+  var escrever = linhas.map(function (r) { return [r[0], r[1], r[2].split('-').reverse().join('/')]; });
+  var antes = JSON.stringify(vals.map(function (r) { return [String(r[0]).trim(), String(r[1]).trim(), dataTexto_(r[2], tz).split('-').reverse().join('/')]; })
+    .filter(function (r) { return r[0] || r[1]; }));
+  if (!formatoNovo || antes !== JSON.stringify(escrever)) {
+    if (!formatoNovo) { try { aba.hideSheet(); } catch (e) {} }
+    aba.getRange(1, 1, 1, 3).setValues([APELIDOS_CAB]);
+    if (escrever.length) aba.getRange(2, 1, escrever.length, 3).setValues(escrever);
+    var sobra = vals.length - escrever.length;
+    if (sobra > 0) aba.getRange(2 + escrever.length, 1, sobra, 3).setValues(Array.from({ length: sobra }, function () { return ['', '', '']; }));
+    try { CacheService.getScriptCache().remove('contextoIA'); } catch (e) {}
+  }
+  return linhas;
+}
+
+// Depois de gravar: aprende os apelidos que a IA notou nesta conversa (só os de produto ou pessoa gravados)
+// e marca o uso dos apelidos que apareceram na fala.
+function aprenderApelidos_(ss, l, linhasGravadas, texto) {
+  var cache = CacheService.getScriptCache();
+  var novos = [];
+  var alvos = {};
+  linhasGravadas.forEach(function (x) { alvos[semAcento_(x.pessoa)] = true; alvos[semAcento_(x.categoria)] = true; });
+  Object.keys(alvos).forEach(function (k) {
+    var pend = cache.get('apelidosPend_' + k);
+    if (!pend) return;
+    JSON.parse(pend).forEach(function (a) { if (alvos[semAcento_(a[1])]) novos.push(a); });
+    try { cache.remove('apelidosPend_' + k); } catch (e) {}
+  });
+  if (!novos.length && !String(texto || '').trim()) return;
+  linhasApelidos_(ss, l, novos, texto);
 }
 
 // Máximo que cada pessoa já fez em cada categoria (aba "Referência Metas"), para avisar número fora do normal.
@@ -388,6 +437,7 @@ function apiGravar(pedido) {
     var log = abaLog_(ss);
     log.appendRow([id, Utilities.formatDate(agora, tz, 'dd/MM/yyyy HH:mm:ss'), quem,
       String(pedido.texto || '').slice(0, 1000), JSON.stringify({ linhas: gravadas }), '']);
+    try { aprenderApelidos_(ss, l, linhas, pedido.texto); } catch (e) {}
     return { ok: true, id: id, n: valores.length, faixa: f.inicio + ' – ' + f.fim };
   } finally {
     trava.releaseLock();
@@ -984,7 +1034,61 @@ function autorizarIA() {
   return r;
 }
 
-function promptConversa_(pessoa, faixa, categorias) {
+// Aba "Exemplos": FRASE | O QUE É (como a equipe fala e o resultado certo). A IA recebe os últimos 40.
+function exemplos_(ss) {
+  var aba = abaPorNome_(ss, EXEMPLOS_ABA);
+  if (!aba) {
+    aba = ss.insertSheet(EXEMPLOS_ABA, ss.getSheets().length);
+    aba.appendRow(['FRASE (como a pessoa fala)', 'O QUE É (resultado certo)']);
+    aba.appendRow(['passei 3 note no teste', '3 notebooks testados']);
+    aba.appendRow(['testei 2 roteador e deu ruim nos dois', '2 roteadores com defeito']);
+    aba.setFrozenRows(1);
+  }
+  var n = aba.getLastRow();
+  if (n < 2) return [];
+  return aba.getRange(2, 1, n - 1, 2).getValues()
+    .map(function (r) { return [String(r[0]).trim(), String(r[1]).trim()]; })
+    .filter(function (r) { return r[0] && r[1]; }).slice(-40);
+}
+
+// O que a IA precisa saber da equipe: exemplos, apelidos e o costume de cada pessoa. Guardado por 10 min,
+// para não ler a planilha a cada resposta.
+function contextoIA_(ss, l) {
+  var cache = CacheService.getScriptCache();
+  var guardado = cache.get('contextoIA');
+  if (guardado) return JSON.parse(guardado);
+  var ctx = { exemplos: [], apelidos: [], habitos: {} };
+  try { ctx.exemplos = exemplos_(ss); } catch (e) {}
+  try { ctx.apelidos = apelidos_(ss, l); } catch (e) {}
+  try {
+    var aba = abaPorNome_(ss, 'Registros');
+    var col = colunasRegistros_(aba);
+    ctx.habitos = habitos_(aba, col, ultimaLinhaComDados_(aba, col), ss.getSpreadsheetTimeZone(), l.pessoas).habitos;
+  } catch (e) {}
+  var texto = JSON.stringify(ctx);
+  if (texto.length < 90000) cache.put('contextoIA', texto, 600);
+  return ctx;
+}
+
+function textoContexto_(ctx, pessoaCompleta) {
+  var partes = [];
+  var h = ctx.habitos && ctx.habitos[pessoaCompleta];
+  if (h && h.categorias && h.categorias.length) {
+    partes.push('Costume desta pessoa nas últimas semanas: ' + h.categorias.slice(0, 4).join(', ')
+      + (h.tipo ? ' (quase sempre ' + h.tipo + ')' : '') + '. Se ela disser só o número, sugira o costume na pergunta '
+      + '("4 caixas de som finalizadas?"), mas nunca grave sem ela confirmar.');
+  }
+  if (ctx.apelidos && ctx.apelidos.length) {
+    partes.push('Apelidos usados na equipe: ' + ctx.apelidos.slice(0, 60).map(function (a) { return '"' + a[0] + '" = ' + a[1]; }).join('; ') + '.');
+  }
+  if (ctx.exemplos && ctx.exemplos.length) {
+    partes.push('Exemplos reais de como a equipe fala e o que significa (siga estes exemplos):\n'
+      + ctx.exemplos.map(function (x) { return '- "' + x[0] + '" = ' + x[1]; }).join('\n'));
+  }
+  return partes.join('\n');
+}
+
+function promptConversa_(pessoa, faixa, categorias, contexto) {
   return [
     'Você é a voz da chamada de produção de uma equipe de assistência técnica. Está conversando por voz, num computador da sala, com '
       + pessoa + ' sobre a produção da faixa ' + faixa + '.',
@@ -1008,8 +1112,42 @@ function promptConversa_(pessoa, faixa, categorias) {
     'Se ela disser que não fez nada nesta faixa, confirme; quando confirmar, use acao "nada". Se ela pedir para parar, use acao "desistir".',
     'Na sala há conversas paralelas e o microfone pega outras pessoas. Se o texto claramente não for resposta para você '
       + '(assunto de outra conversa, outra pessoa chamada), use acao "ignorar" e fala vazia.',
-    'Nunca invente números. Responda só o JSON pedido.'
+    'Se a pessoa chamar um produto ou alguém por apelido, gíria, abreviação ou nome dito errado (diferente da lista), '
+      + 'coloque em apelidos: dito (exatamente como ela falou, de 1 a 3 palavras) e significa (o nome exato da lista). '
+      + 'Não coloque o que já foi dito igual à lista.',
+    'Nunca invente números. Responda só o JSON pedido.',
+    contexto || ''
   ].join('\n');
+}
+
+// Aba "Conversas": uma linha por conversa da chamada (o que a pessoa disse, o que o computador falou e o resultado),
+// para achar onde a conversa trava ou entende errado. Guarda as últimas 3000.
+function apiRegistrarConversa(reg) {
+  reg = reg || {};
+  var ss = abrir_(config_());
+  var aba = ss.getSheetByName(CONVERSAS_ABA);
+  if (!aba) {
+    aba = ss.insertSheet(CONVERSAS_ABA, ss.getSheets().length);
+    aba.appendRow(['QUANDO', 'APARELHO', 'PESSOA', 'CONVERSA', 'RESULTADO', 'RESPOSTAS DA IA', 'DEMORA DA IA (s)', 'DURAÇÃO (s)']);
+    aba.setFrozenRows(1);
+  }
+  var tz = ss.getSpreadsheetTimeZone();
+  var falas = (reg.falas || []).slice(0, 60).map(function (x) {
+    return (x.quem === 'pessoa' ? 'Pessoa: ' : 'App: ') + String(x.texto || '').slice(0, 300);
+  }).join('\n');
+  aba.appendRow([
+    Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy HH:mm:ss'),
+    String(reg.aparelho || '').slice(0, 60) + (reg.teste ? ' (teste)' : ''),
+    String(reg.pessoa || '').slice(0, 80),
+    falas,
+    String(reg.resultado || '').slice(0, 300),
+    Number(reg.chamadasIA) || 0,
+    Math.round((Number(reg.msIA) || 0) / 100) / 10,
+    Math.round((Number(reg.duracao) || 0) / 100) / 10
+  ]);
+  var n = aba.getLastRow();
+  if (n > CONVERSAS_MAX + 1) aba.deleteRows(2, n - CONVERSAS_MAX - 1);
+  return { ok: true };
 }
 
 function apiConversar(pedido) {
@@ -1028,7 +1166,8 @@ function apiConversar(pedido) {
   while (contents.length && contents[0].role === 'model') contents.shift();
   if (!contents.length) contents = [{ role: 'user', parts: [{ text: 'sou eu' }] }];
   var corpo = {
-    systemInstruction: { parts: [{ text: promptConversa_(nome, f.inicio + ' às ' + f.fim, l.categorias) }] },
+    systemInstruction: { parts: [{ text: promptConversa_(nome, f.inicio + ' às ' + f.fim, l.categorias,
+      textoContexto_(contextoIA_(ss, l), String(pedido.pessoa || ''))) }] },
     contents: contents,
     generationConfig: {
       temperature: 0.3,
@@ -1040,7 +1179,10 @@ function apiConversar(pedido) {
           acao: { type: 'STRING', enum: ['perguntar', 'confirmar', 'gravar', 'nada', 'desistir', 'ignorar'] },
           linhas: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
             categoria: { type: 'STRING' }, testados: { type: 'INTEGER' }, finalizados: { type: 'INTEGER' }, defeitos: { type: 'INTEGER' }
-          }, required: ['categoria'] } }
+          }, required: ['categoria'] } },
+          apelidos: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
+            dito: { type: 'STRING' }, significa: { type: 'STRING' }
+          }, required: ['dito', 'significa'] } }
         },
         required: ['fala', 'acao']
       }
@@ -1056,11 +1198,11 @@ function apiConversar(pedido) {
     try {
       var dados = JSON.parse(resp.getContentText());
       var texto = dados.candidates[0].content.parts.map(function (p) { return p.text || ''; }).join('');
-      return limparRespostaIA_(JSON.parse(texto), l.categorias);
+      return guardarApelidosDaIA_(limparRespostaIA_(JSON.parse(texto), l.categorias, l.pessoas), pedido.pessoa);
     } catch (e) { ultimoErro = 'resposta estranha: ' + e.message; }
   }
   if (reserva) {
-    var mensagens = [{ role: 'system', content: corpo.systemInstruction.parts[0].text + '\nResponda só com um JSON: {"fala": texto, "acao": perguntar|confirmar|gravar|nada|desistir|ignorar, "linhas": [{"categoria", "testados", "finalizados", "defeitos"}]}.' }]
+    var mensagens = [{ role: 'system', content: corpo.systemInstruction.parts[0].text + '\nResponda só com um JSON: {"fala": texto, "acao": perguntar|confirmar|gravar|nada|desistir|ignorar, "linhas": [{"categoria", "testados", "finalizados", "defeitos"}], "apelidos": [{"dito", "significa"}]}.' }]
       .concat(contents.map(function (c) { return { role: c.role === 'model' ? 'assistant' : 'user', content: c.parts[0].text }; }));
     var r2 = UrlFetchApp.fetch('https://ollama.com/api/chat', {
       method: 'post', contentType: 'application/json', muteHttpExceptions: true,
@@ -1068,7 +1210,7 @@ function apiConversar(pedido) {
       payload: JSON.stringify({ model: OLLAMA_MODELO, messages: mensagens, stream: false, format: 'json', options: { temperature: 0.3 } })
     });
     if (r2.getResponseCode() === 200) {
-      try { return limparRespostaIA_(JSON.parse(JSON.parse(r2.getContentText()).message.content), l.categorias); }
+      try { return guardarApelidosDaIA_(limparRespostaIA_(JSON.parse(JSON.parse(r2.getContentText()).message.content), l.categorias, l.pessoas), pedido.pessoa); }
       catch (e) { ultimoErro = 'Ollama: resposta estranha: ' + e.message; }
     } else ultimoErro = 'Ollama ' + r2.getResponseCode() + ' ' + String(r2.getContentText()).slice(0, 200);
   }
@@ -1076,9 +1218,26 @@ function apiConversar(pedido) {
 }
 
 // Só categorias da planilha e quantidades inteiras; categoria desconhecida vira pergunta.
-function limparRespostaIA_(r, categorias) {
-  var oficial = {};
+// Apelidos que a IA notou ficam guardados 15 min; viram apelido de verdade só quando a conversa grava (apiGravar).
+function guardarApelidosDaIA_(r, pessoa) {
+  if (r.apelidos && r.apelidos.length && pessoa) {
+    var cache = CacheService.getScriptCache(), k = 'apelidosPend_' + semAcento_(pessoa);
+    var antes = JSON.parse(cache.get(k) || '[]');
+    cache.put(k, JSON.stringify(antes.concat(r.apelidos).slice(-20)), 900);
+  }
+  delete r.apelidos;
+  return r;
+}
+
+function limparRespostaIA_(r, categorias, pessoas) {
+  var oficial = {}, nomes = {};
   categorias.forEach(function (c) { oficial[semAcento_(c)] = c; });
+  categorias.concat(pessoas || []).forEach(function (c) { nomes[semAcento_(c)] = c; });
+  var apelidos = (r.apelidos || []).map(function (a) {
+    var dito = String((a && a.dito) || '').replace(/[^\wÀ-ÿ ]/g, ' ').replace(/\s+/g, ' ').trim();
+    var alvo = nomes[semAcento_(a && a.significa)];
+    return dito && alvo && dito.split(' ').length <= 3 && !nomes[semAcento_(dito)] ? [dito, alvo] : null;
+  }).filter(Boolean);
   var acao = ['perguntar', 'confirmar', 'gravar', 'nada', 'desistir', 'ignorar'].indexOf(r.acao) >= 0 ? r.acao : 'perguntar';
   if (acao === 'ignorar') return { fala: '', acao: 'ignorar', linhas: [] };
   var desconhecida = '';
@@ -1093,5 +1252,5 @@ function limparRespostaIA_(r, categorias) {
     return { fala: 'Não achei a categoria ' + desconhecida + ' na planilha. Qual é o produto?', acao: 'perguntar', linhas: [] };
   }
   if ((acao === 'gravar' || acao === 'confirmar') && !linhas.length) acao = 'perguntar';
-  return { fala: fala || 'Pode repetir?', acao: acao, linhas: linhas };
+  return { fala: fala || 'Pode repetir?', acao: acao, linhas: linhas, apelidos: apelidos };
 }
