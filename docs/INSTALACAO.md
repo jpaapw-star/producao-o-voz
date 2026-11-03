@@ -32,7 +32,7 @@ Mande o link. Não tem senha: quem tem o link pode lançar. No iPhone: abra no S
 - O app grava como você, então a equipe não precisa ter acesso à planilha. Você precisa poder editar a planilha.
 - Ele só **acrescenta linhas** na aba Registros, no mesmo formato da linha de cima. Ele não mexe nas outras abas nem no app que já existe.
 - Quem lançou cada coisa fica na aba **Lançamentos por voz** (criada sozinha).
-- Apelidos e siglas ficam na aba **Apelidos** (criada sozinha): coluna A o apelido ("Gabi", "PS5"), coluna B o nome ou a categoria igual à aba Configurações. Vale na próxima vez que o app abrir (ou em até 10 minutos). A coluna C mostra "ok" ou o que está errado na linha.
+- Apelidos e siglas ("Gabi", "PS5", "note") ficam na aba **Apelidos**, escondida, que se preenche e se limpa sozinha: entra o apelido que a IA percebeu numa conversa confirmada e gravada; sai o que não bate com Configurações, o repetido e o que ficou 60 dias sem ser falado. Não precisa mexer nela.
 - **Chamada**: nos horários da chamada (07:30 … 12:30, 14:30 … 16:30 e 16:45, ou os da aba **Agenda da chamada**), todos os computadores com o app aberto falam juntos, pelo relógio do Google. O horário de cada um vem da aba **Horários** (PESSOA, ENTRADA, SAÍDA; quem já saiu não é chamado). Quem não está na aba é chamado pelo costume das últimas 2 semanas. Supervisores não são chamados. Falta nunca é marcada sozinha.
 - **Conversa na chamada**: marque "Ouvir as respostas pelo microfone" nos computadores com microfone (Edge ou Chrome). Aí a chamada chama uma pessoa por vez; ela vai a qualquer computador, diz "sou eu" e fala o que fez; o computador repete, pergunta se está certo e grava. Sem nenhum computador ouvindo, a chamada fala a lista de todos que faltam e repete a cada 2 minutos.
 
@@ -50,7 +50,7 @@ A página do Apps Script fica dentro de um quadro do Google que bloqueia o micro
 
 - **Conversas**: cada conversa da chamada vira uma linha, com o que a pessoa disse, o que o computador falou, o resultado e quanto a IA demorou. Os testes do botão Conversar aparecem com "(teste)". Ficam guardadas as últimas 3000.
 - **Exemplos**: escreva na coluna A uma frase do jeito que a equipe fala e na coluna B o que ela quer dizer, por exemplo "passei 3 note no teste" = "3 notebooks testados". A IA segue esses exemplos em toda conversa; quando ela errar, copie a frase da aba Conversas para cá com o resultado certo. Valem as últimas 40 linhas.
-- A IA também usa a aba **Apelidos** e o costume de cada pessoa (o que ela lançou nas últimas semanas). Mudanças nessas abas entram em até 10 minutos.
+- A IA também usa os apelidos aprendidos e o costume de cada pessoa (o que ela lançou nas últimas semanas). Mudanças nessas abas entram em até 10 minutos.
 
 ## IA da conversa (opcional, grátis)
 
